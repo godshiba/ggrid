@@ -3,8 +3,6 @@
 Decentralized GPU network — "Uber for GPUs". Contribute idle GPU power and earn
 **$GGRID**; developers get cheap, OpenAI-compatible AI compute, routed across the grid.
 
-Full engineering plan: **[PLAN.md](PLAN.md)**.
-
 ## Layout
 
 ```
@@ -37,5 +35,3 @@ serves it on your domain with automatic SSL.
 - Secrets (`RUNPOD_API_KEY`, `ADMIN_KEY`) go in the deploy platform → Settings → Actions → Secrets;
   they're listed in `RUNTIME_KEYS` so the container receives them.
 - Wait for a green build/deploy run before opening the domain.
-
-See [server/README.md](server/README.md) for the API reference.

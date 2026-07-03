@@ -682,12 +682,6 @@ function CodeTerminal() {
   )
 }
 
-const SPLIT: [string, string][] = [
-  ['Providers', '75%'],
-  ['Buyback & burn', '12.5%'],
-  ['Stakers', '7.5%'],
-  ['Treasury', '5%'],
-]
 function SplitBars() {
   return (
     <Reveal dir="scale" style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
