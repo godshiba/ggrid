@@ -162,6 +162,32 @@ const Mono = ({ children }: { children: ReactNode }) => (
 
 const fmtTime = (ms: number) => new Date(ms).toLocaleString()
 
+/* ---------------- funding (pay into the on-chain contract) ---------------- */
+// Non-custodial: funds go into the ggrid_payout escrow contract, which pays
+// providers directly. We're just the router. Activates with the $GGRID launch.
+function Funding() {
+  return (
+    <div style={PANEL}>
+      <div style={{ ...LABEL, marginBottom: 16 }}>FUNDING</div>
+      <p style={{ fontFamily: 'var(--display)', fontWeight: 300, fontSize: 14, color: '#9fb4c6', margin: '0 0 16px', lineHeight: 1.6 }}>
+        Non-custodial by design: you deposit <b style={{ color: INK }}>$GGRID</b> straight into the on-chain
+        escrow contract — <b style={{ color: INK }}>not to us</b>. As you use the API, the contract pays the GPU
+        provider their <b style={{ color: INK }}>75%</b> directly. We only route your requests; we never hold your funds.
+      </p>
+      <Steps
+        items={[
+          { title: 'Deposit into the contract', body: 'Connect your wallet and fund the on-chain escrow — your balance lives in the contract, auditable by anyone.' },
+          { title: 'Use the API', body: 'Each request draws from your on-chain deposit at the same per-token price.' },
+          { title: 'Providers paid from the contract', body: <>The contract splits every job <Mono>75% provider · 12.5% burn · 7.5% stakers · 5% treasury</Mono> — enforced by code, not by us.</> },
+        ]}
+      />
+      <div style={{ marginTop: 16 }}>
+        <Notice kind="ok" msg="On-chain funding opens with the $GGRID token launch. Until then, the team can enable access for testing." />
+      </div>
+    </div>
+  )
+}
+
 /* ---------------- developer dashboard ---------------- */
 function Developer() {
   const [apiKey, setApiKey] = useState<string | null>(session.apiKey())
@@ -299,21 +325,14 @@ function Developer() {
     <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
       <Notice msg={err} kind="err" />
 
-      {/* balance + account */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(200px,1fr))', gap: 16 }}>
-        <div style={PANEL}>
-          <div style={LABEL}>BALANCE</div>
-          <div style={{ fontFamily: 'var(--display)', fontWeight: 300, fontSize: 38, color: INK, marginTop: 8 }}>
-            {me ? usd(me.balance) : '-'}
-          </div>
-          <div style={{ fontFamily: 'var(--mono)', fontSize: 11, color: DIM, marginTop: 4 }}>
-            {me ? `${me.balance.toLocaleString()} credits` : ''} · {me?.runpodAllowed ? 'cloud fallback ON' : 'community GPUs'}
-          </div>
-        </div>
-        <div style={PANEL}>
-          <div style={LABEL}>ACCOUNT</div>
-          <div style={{ fontFamily: 'var(--mono)', fontSize: 13, color: INK, marginTop: 10, wordBreak: 'break-all' }}>
-            {me?.userId ?? '-'}
+      {/* account */}
+      <div style={PANEL}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12 }}>
+          <div>
+            <div style={LABEL}>ACCOUNT</div>
+            <div style={{ fontFamily: 'var(--mono)', fontSize: 13, color: INK, marginTop: 10, wordBreak: 'break-all' }}>
+              {me?.userId ?? '-'}
+            </div>
           </div>
           <button
             onClick={() => {
@@ -322,12 +341,15 @@ function Developer() {
               setMe(null)
             }}
             className="link-dim"
-            style={{ marginTop: 12, background: 'none', border: 'none', cursor: 'pointer', fontFamily: 'var(--mono)', fontSize: 11, color: DIM, padding: 0 }}
+            style={{ background: 'none', border: 'none', cursor: 'pointer', fontFamily: 'var(--mono)', fontSize: 11, color: DIM, padding: 0, whiteSpace: 'nowrap' }}
           >
             Sign out
           </button>
         </div>
       </div>
+
+      {/* funding — pay into the on-chain contract, not us */}
+      <Funding />
 
       {/* freshly created key (shown once) */}
       {freshKey && (
@@ -356,7 +378,7 @@ function Developer() {
               ),
             },
             { title: 'Send a request', body: 'Use the quickstart below, or your own client. The grid routes each call to an available GPU.' },
-            { title: 'Track usage', body: 'Every call shows up in Recent requests with tokens and cost, and your balance updates live.' },
+            { title: 'Track usage', body: 'Every call shows up in Recent requests with its tokens and cost.' },
           ]}
         />
       </div>
