@@ -1,0 +1,6 @@
+# Make cargo's resolver prefer dependency versions compatible with our rust-version
+# (1.79, the Solana 1.18 platform-tools toolchain). Without this, building in a year
+# where crates.io has moved on pulls edition2024 crates that rustc 1.79 can't parse.
+# Requires a cargo >= 1.84 to GENERATE the lockfile; the SBF build then reuses it.
+[resolver]
+incompatible-rust-versions = "fallback"

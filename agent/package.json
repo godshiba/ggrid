@@ -1,0 +1,8 @@
+{
+  "name": "ggrid-agent",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "bun index.ts"
+  }
+}

@@ -1,0 +1,10 @@
+.anchor
+target
+node_modules
+test-ledger
+**/*.rs.bk
+keypairs/*.json
+.DS_Store
+# never commit a wallet secret
+deployer.secret
+deployer.json
