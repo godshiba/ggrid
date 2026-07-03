@@ -1,0 +1,408 @@
+/* ============================================================
+   GPUGrid - "Mine Descent"
+   Cold steel at the surface warming to a molten $GGRID core.
+   Layout lives inline in App.tsx (ported from the handoff source);
+   this file holds the globals, keyframes and reusable helpers.
+   ============================================================ */
+
+:root {
+  --ink: #e8f0f8;
+  --steel: #9fb4c6;
+  --steel-2: #8aa0b4;
+  --dim: #6a7d8e;
+  --dim-2: #5d6f80;
+  --accent: #5fd4e2; /* compute / cyan */
+  --core: #e6a44b; /* molten amber */
+  --bg-0: #06080b;
+  --display: 'Saira', system-ui, sans-serif;
+  --mono: 'JetBrains Mono', ui-monospace, monospace;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  background: var(--bg-0);
+  color: var(--ink);
+  overflow-x: hidden;
+  font-family: var(--display);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+a {
+  color: inherit;
+}
+
+::selection {
+  background: rgba(95, 212, 226, 0.28);
+}
+
+.mono {
+  font-family: var(--mono);
+}
+
+/* no scrollbar - the depth meter is the scroll indicator */
+::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+  display: none;
+}
+html {
+  scrollbar-width: none;
+}
+body {
+  -ms-overflow-style: none;
+}
+
+/* ---------- keyframes ---------- */
+@keyframes ggCue {
+  0%,
+  100% {
+    transform: translateY(0);
+    opacity: 0.35;
+  }
+  50% {
+    transform: translateY(9px);
+    opacity: 1;
+  }
+}
+@keyframes godraySway {
+  0%,
+  100% {
+    transform: translateX(-3%) skewX(-3.5deg);
+    opacity: 0.82;
+  }
+  50% {
+    transform: translateX(3%) skewX(3.5deg);
+    opacity: 1;
+  }
+}
+@keyframes waveDrift {
+  from {
+    transform: translateX(0);
+  }
+  to {
+    transform: translateX(-50%);
+  }
+}
+@keyframes waveDriftRev {
+  from {
+    transform: translateX(-50%);
+  }
+  to {
+    transform: translateX(0);
+  }
+}
+/* surface heaving up and down - gives the waves real energy */
+@keyframes waveHeave {
+  0%,
+  100% {
+    transform: translateY(-9px);
+  }
+  50% {
+    transform: translateY(11px);
+  }
+}
+/* sunlight dappling the water just under the surface */
+.caustics {
+  mix-blend-mode: screen;
+  background:
+    radial-gradient(42% 26% at 28% 10%, rgba(150, 236, 250, 0.2), transparent 62%),
+    radial-gradient(36% 22% at 66% 16%, rgba(128, 224, 246, 0.16), transparent 64%),
+    radial-gradient(30% 20% at 48% 24%, rgba(165, 242, 252, 0.14), transparent 60%),
+    radial-gradient(26% 16% at 82% 30%, rgba(140, 230, 248, 0.12), transparent 62%);
+  background-repeat: no-repeat;
+  will-change: transform, opacity;
+  animation: causticDrift 8s ease-in-out infinite alternate;
+}
+@keyframes causticDrift {
+  0% {
+    transform: translate3d(-4%, -2%, 0) scale(1.04);
+    opacity: 0.45;
+  }
+  100% {
+    transform: translate3d(4%, 3%, 0) scale(1.12);
+    opacity: 0.9;
+  }
+}
+@keyframes emberPulse {
+  0%,
+  100% {
+    filter: brightness(0.9);
+  }
+  50% {
+    filter: brightness(1.14);
+  }
+}
+@keyframes nodePulse {
+  0%,
+  100% {
+    opacity: 0.3;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1.35);
+  }
+}
+@keyframes coreBreath {
+  0%,
+  100% {
+    opacity: 0.4;
+  }
+  50% {
+    opacity: 0.85;
+  }
+}
+
+/* ---------- range slider (provider rig) ---------- */
+input[type='range'].rig {
+  -webkit-appearance: none;
+  appearance: none;
+  height: 3px;
+  background: rgba(140, 158, 176, 0.22);
+  border-radius: 2px;
+  outline: none;
+}
+input[type='range'].rig::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 15px;
+  height: 15px;
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 14px rgba(95, 212, 226, 0.8);
+  cursor: pointer;
+}
+input[type='range'].rig::-moz-range-thumb {
+  width: 15px;
+  height: 15px;
+  border: none;
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 14px rgba(95, 212, 226, 0.8);
+  cursor: pointer;
+}
+
+/* ---------- reveal (gentle, fast rise - content always visible on load) ---------- */
+.reveal {
+  opacity: 1;
+  transform: translateY(14px);
+  transition: transform 0.45s cubic-bezier(0.2, 0.7, 0.2, 1);
+}
+.reveal-up,
+.reveal-down,
+.reveal-left,
+.reveal-right,
+.reveal-scale {
+  transform: translateY(14px);
+}
+.reveal.in {
+  transform: none;
+}
+
+/* split bars: shown at full width immediately */
+.split-fill {
+  transform: none;
+}
+
+/* ---------- preloader (3D logo assembles as it loads) ---------- */
+.preloader {
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 34px;
+  background: #080c11;
+  transition: opacity 0.9s cubic-bezier(0.2, 0.7, 0.2, 1), visibility 0.9s;
+}
+.preloader.done {
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+}
+.preloader__stage {
+  width: min(58vw, 360px);
+  height: min(58vw, 360px);
+}
+.preloader__meta {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 16px;
+  width: min(72vw, 300px);
+}
+.preloader__wm {
+  font-family: var(--display);
+  font-weight: 500;
+  letter-spacing: 0.4em;
+  font-size: 14px;
+  color: #cdd9e4;
+  padding-left: 0.4em;
+}
+.preloader__bar {
+  width: 100%;
+  height: 2px;
+  background: rgba(140, 158, 176, 0.18);
+  border-radius: 2px;
+  overflow: hidden;
+}
+.preloader__bar i {
+  display: block;
+  height: 100%;
+  transform-origin: left;
+  transform: scaleX(0);
+  background: #5fd4e2;
+  transition: transform 0.2s linear;
+}
+.preloader__pct {
+  font-size: 10px;
+  letter-spacing: 0.34em;
+  color: #5fd4e2;
+}
+
+/* ---------- two-column grids collapse on small screens ---------- */
+.grid2 {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 64px;
+  align-items: center;
+  width: 100%;
+  max-width: 1180px;
+  margin: 0 auto;
+  position: relative;
+  z-index: 1;
+}
+/* grid items default to min-width:auto, which refuses to shrink below their
+   content's min-content size — that let fixed-width visuals (460px) blow past
+   a narrow viewport. min-width:0 lets each track shrink to fit the phone. */
+.grid2 > * {
+  min-width: 0;
+}
+@media (max-width: 1000px) {
+  .grid2 {
+    grid-template-columns: 1fr !important;
+    gap: 40px !important;
+  }
+  .grid2 > .order2 {
+    order: 0 !important;
+  }
+}
+@media (max-width: 640px) {
+  .site-header {
+    padding: 14px 18px !important;
+  }
+  .depth-meter {
+    display: none !important;
+  }
+  /* console header: drop the wordmark (logo stays) and tighten padding so the
+     Developers / Providers / Site nav fits on a phone without clipping. */
+  .console-header {
+    padding: 14px 16px !important;
+  }
+  .console-brand-text {
+    display: none !important;
+  }
+}
+
+/* ---------- hover states (inline styles can't express :hover) ---------- */
+.btn-x:hover {
+  background: rgba(95, 212, 226, 0.1);
+  border-color: rgba(95, 212, 226, 0.4);
+}
+.btn-cyan:hover {
+  filter: brightness(1.12);
+}
+.btn-solid:hover {
+  filter: brightness(1.08);
+}
+.btn-ghost:hover {
+  border-color: rgba(95, 212, 226, 0.5);
+  background: rgba(95, 212, 226, 0.1);
+  color: #ffffff;
+}
+.link-dim:hover {
+  color: #ffffff !important;
+}
+.wallet-menu-item:hover {
+  background: rgba(140, 158, 176, 0.1);
+}
+.tier-btn:hover {
+  border-color: rgba(95, 212, 226, 0.45);
+}
+.tab-btn:hover {
+  color: #9fb4c6;
+}
+.node-rig:hover {
+  box-shadow: 0 0 0 1px rgba(95, 212, 226, 0.7), 0 0 18px rgba(95, 212, 226, 0.5);
+  border-color: rgba(95, 212, 226, 0.9) !important;
+}
+
+/* ---------- console entrance (#/app, #/providers) ---------- */
+.console-enter {
+  animation: consoleFade 0.45s ease both;
+}
+.console-enter .console-header {
+  animation: consoleHeaderIn 0.5s cubic-bezier(0.2, 0.7, 0.2, 1) both;
+}
+/* the tab body is keyed by tab, so this replays on every Developers/Providers
+   switch - not just the first console load */
+.console-tab {
+  animation: consoleMainIn 0.5s cubic-bezier(0.2, 0.7, 0.2, 1) 0.06s both;
+}
+@keyframes consoleFade {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+@keyframes consoleHeaderIn {
+  from {
+    opacity: 0;
+    transform: translateY(-14px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+@keyframes consoleMainIn {
+  from {
+    opacity: 0;
+    transform: translateY(22px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+  .reveal {
+    transition-duration: 0.001ms;
+    transform: none;
+    opacity: 1;
+    filter: none;
+  }
+  .split-fill {
+    transform: none;
+  }
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+  }
+}
