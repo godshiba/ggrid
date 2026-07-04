@@ -1,6 +1,6 @@
 # GpuGrid ($GGRID)
 
-Decentralized GPU network — "Uber for GPUs". Contribute idle GPU power and earn
+Decentralized GPU network - "Uber for GPUs". Contribute idle GPU power and earn
 **$GGRID**; developers get cheap, OpenAI-compatible AI compute, routed across the grid.
 
 ## Layout
