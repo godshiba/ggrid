@@ -13,6 +13,7 @@
     "@fontsource/saira": "^5.2.11",
     "@privy-io/react-auth": "^3.33.1",
     "@react-three/fiber": "8.17.10",
+    "@solana-program/memo": "^0.8.0",
     "@solana/web3.js": "^1.95.3",
     "lenis": "^1.3.23",
     "react": "^18.3.1",

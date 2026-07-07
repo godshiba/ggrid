@@ -1,5 +1,11 @@
 import { PrivyProvider } from '@privy-io/react-auth'
+import { toSolanaWalletConnectors } from '@privy-io/react-auth/solana'
 import Dashboard from './Dashboard'
+
+// External Solana wallet connectors (Phantom, Solflare, Backpack, ... via the
+// wallet-standard). Without this, a `solana-only` config shows the "wallet"
+// button but the wallet list is empty.
+const solanaConnectors = toSolanaWalletConnectors()
 
 // The console is the only place that needs Privy, so we wrap it here (this file is
 // lazy-loaded) - the landing page never pays for the Privy SDK.
@@ -19,6 +25,7 @@ export default function ConsoleRoot({ tab }: { tab: 'app' | 'providers' }) {
           walletChainType: 'solana-only',
         },
         loginMethods: ['email', 'wallet', 'google'],
+        externalWallets: { solana: { connectors: solanaConnectors } },
         embeddedWallets: { solana: { createOnLogin: 'users-without-wallets' } },
       }}
     >
