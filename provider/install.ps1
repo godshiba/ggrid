@@ -85,7 +85,20 @@ function Get-ModelsJson {
   $names = (Invoke-RestMethod "http://localhost:11434/api/tags").models | ForEach-Object { $_.name }
   "[" + (($names | ForEach-Object { '"' + ($_ -replace '"', '') + '"' }) -join ",") + "]"
 }
-$body = '{"url":"' + $publicUrl + '","models":' + (Get-ModelsJson) + ',"providerToken":"' + $ProviderToken + '"}'
+# Best-effort GPU name so the node shows up labelled in the marketplace.
+function Get-GpuName {
+  try {
+    $n = (& nvidia-smi --query-gpu=name --format=csv,noheader 2>$null | Select-Object -First 1)
+    if ($n) { return $n.Trim() }
+  } catch {}
+  try {
+    $c = (Get-CimInstance Win32_VideoController -ErrorAction Stop | Select-Object -First 1 -ExpandProperty Name)
+    if ($c) { return $c.Trim() }
+  } catch {}
+  return ""
+}
+$gpuName = (Get-GpuName) -replace '"', ''
+$body = '{"url":"' + $publicUrl + '","models":' + (Get-ModelsJson) + ',"gpuInfo":"' + $gpuName + '","providerToken":"' + $ProviderToken + '"}'
 $reg = Invoke-RestMethod "$Gateway/nodes/register" -Method Post -ContentType "application/json" -Body $body
 if (-not $reg.nodeId) { throw "Registration failed." }
 Info "Connected! Node id: $($reg.nodeId)"

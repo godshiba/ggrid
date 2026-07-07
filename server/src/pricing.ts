@@ -38,3 +38,9 @@ export function feeSplit(cost: number): {
 export function knownModels(): string[] {
   return Object.keys(PRICES)
 }
+
+// The published price sheet (per 1,000,000 tokens) + the fallback for unlisted models.
+export function priceTable(): { model: string; in: number; out: number }[] {
+  return Object.entries(PRICES).map(([model, p]) => ({ model, in: p.in, out: p.out }))
+}
+export const defaultPrice = DEFAULT

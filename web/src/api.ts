@@ -65,6 +65,68 @@ export interface Payout {
   settled_at: number | null
 }
 
+export interface CreditIntent {
+  reference: string
+  transaction: string // base64 unsigned deposit tx
+  credits: number
+  rawAmount: string
+  programId: string
+  mint: string
+  vault: string
+  decimals: number
+  rawPerCredit: number
+}
+export interface CreditStatus {
+  status: 'PENDING' | 'CONFIRMED'
+  credits?: number
+  signature?: string
+  balance?: number
+  note?: string
+}
+
+// A GPU in the public marketplace (safe view - no url/secret).
+export interface GpuNode {
+  id: string
+  gpu: string
+  source: 'LOCAL' | 'RUNPOD'
+  models: string[]
+  priceFactor: number
+  reliability: number
+  perfTokensPerSec: number
+  uptimePct: number
+  activeJobs: number
+  freeSlots: number
+  online: boolean
+  quarantined: boolean
+}
+
+// A wallet's real on-chain $GGRID balance (distinct from off-chain credits).
+export interface WalletBalance {
+  available: boolean
+  wallet: string
+  mint?: string
+  decimals?: number
+  rawAmount?: string
+  uiAmount?: number
+  error?: string
+}
+
+export interface Pricing {
+  creditUnitUsd: number
+  models: { model: string; in: number; out: number }[]
+  defaultPrice: { in: number; out: number }
+  feeSplit: { providerPct: number; burnPct: number; stakersPct: number; treasuryPct: number }
+  ggrid: { rawPerCredit: number; decimals: number; tokensPerCredit: number }
+  free: {
+    signupBonusCredits: number
+    signupBonusUsd: number
+    rateLimitPerMin: number
+    signupsPerIpPerDay: number
+    maxOutputTokens: number
+    communityGpusOnly: boolean
+  }
+}
+
 export class ApiError extends Error {
   status: number
   constructor(message: string, status: number) {
@@ -105,7 +167,15 @@ export const api = {
   // ---- public ----
   signup: (email?: string) =>
     req<{ userId: string; apiKey: string; balance: number }>('/api/signup', { body: { email: email ?? null } }),
+  // Exchange a Privy access token for a GGRID account (creates on first login).
+  authPrivy: (privyToken: string) =>
+    req<{ userId: string; balance: number; apiKey?: string; isNew: boolean }>('/api/auth/privy', { body: { token: privyToken } }),
   stats: () => req<Stats>('/api/stats'),
+  pricing: () => req<Pricing>('/api/pricing'),
+  // GPU marketplace catalogue. all=true also lists offline nodes.
+  nodes: (all = false) => req<{ nodes: GpuNode[] }>(`/api/nodes${all ? '?all=1' : ''}`),
+  // Real on-chain $GGRID balance for a Solana wallet (public chain read).
+  walletBalance: (wallet: string) => req<WalletBalance>(`/api/wallet/balance?wallet=${encodeURIComponent(wallet)}`),
   models: () => req<{ data: { id: string }[] }>('/v1/models'),
 
   // ---- developer (apiKey) ----
@@ -115,7 +185,24 @@ export const api = {
   createKey: (token: string, label?: string) => req<{ apiKey: string }>('/api/keys', { token, body: { label } }),
   revokeKey: (token: string, id: string) => req<{ ok: true }>(`/api/keys/${id}`, { token, method: 'DELETE' }),
 
-  // ---- provider (providerToken) ----
+  // top up credits by depositing $GGRID on-chain: intent returns an unsigned
+  // deposit tx + a reference; the wallet signs+sends it, then we poll status.
+  creditsIntent: (token: string, wallet: string, tokens: number) =>
+    req<CreditIntent>('/api/credits/intent', { token, body: { wallet, tokens } }),
+  creditsStatus: (token: string, reference: string) =>
+    req<CreditStatus>(`/api/credits/status?reference=${encodeURIComponent(reference)}`, { token }),
+  // DEV ONLY: simulate a deposit (no wallet / no chain). 404s unless the gateway
+  // runs with DEV_MOCK_TOPUP=1 - only wired up from the vite dev server.
+  creditsDevTopup: (token: string, tokens: number) =>
+    req<CreditStatus>('/api/credits/dev-topup', { token, body: { tokens } }),
+
+  // ---- provider (Privy login, or providerToken) ----
+  // Exchange a Privy access token for a provider account (creates on first login).
+  authPrivyProvider: (privyToken: string) =>
+    req<{ providerId: string; providerToken?: string; isNew: boolean }>('/api/auth/privy-provider', { body: { token: privyToken } }),
+  // Issue/rotate the node token for the installer (auth: Privy token or provider token).
+  providerNodeToken: (token: string) =>
+    req<{ providerToken: string }>('/api/provider/node-token', { token, method: 'POST' }),
   createProvider: (payoutWallet?: string) =>
     req<{ providerId: string; providerToken: string }>('/api/providers', {
       body: { payoutWallet: payoutWallet ?? null },
@@ -129,3 +216,11 @@ export const api = {
 
 /* 1 credit = 1 micro-USD. Render balances/costs as dollars. */
 export const usd = (credits: number) => `$${(credits / 1_000_000).toFixed(2)}`
+
+/* Render a credit balance as $GGRID tokens. tokensPerCredit comes from /api/pricing
+   (= rawPerCredit / 10^decimals), so it stays correct if the token rate changes. */
+export const ggrid = (credits: number, tokensPerCredit: number) => {
+  const tokens = credits * tokensPerCredit
+  const digits = tokens > 0 && tokens < 1 ? 6 : 2
+  return `${tokens.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: digits })} $GGRID`
+}

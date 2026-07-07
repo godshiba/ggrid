@@ -98,14 +98,30 @@ CREATE TABLE IF NOT EXISTS payouts (
   settled_at    INTEGER
 );
 
+CREATE TABLE IF NOT EXISTS deposit_intents (
+  reference    TEXT PRIMARY KEY,   -- Solana Pay reference pubkey (base58), unguessable, single-use
+  user_id      TEXT NOT NULL,
+  status       TEXT NOT NULL,      -- PENDING | CONFIRMED
+  signature    TEXT,               -- deposit tx signature once found on-chain
+  raw_amount   TEXT,               -- $GGRID raw units deposited (bigint as string)
+  credits      INTEGER,            -- credits added to the user's balance
+  created_at   INTEGER NOT NULL,
+  confirmed_at INTEGER
+);
+
 CREATE INDEX IF NOT EXISTS idx_jobs_user ON jobs(user_id);
 CREATE INDEX IF NOT EXISTS idx_ledger_provider ON ledger(provider_id);
 CREATE INDEX IF NOT EXISTS idx_payouts_provider ON payouts(provider_id);
+CREATE INDEX IF NOT EXISTS idx_deposit_user ON deposit_intents(user_id);
+-- Backstop against a single on-chain deposit being credited twice.
+CREATE UNIQUE INDEX IF NOT EXISTS idx_deposit_sig ON deposit_intents(signature) WHERE signature IS NOT NULL;
 `)
 
 // Idempotent migrations for databases created before a column existed.
 for (const ddl of [
   'ALTER TABLE users ADD COLUMN runpod_allowed INTEGER NOT NULL DEFAULT 0',
+  'ALTER TABLE users ADD COLUMN privy_id TEXT', // Privy identity (did:privy:...) — console login
+  'ALTER TABLE providers ADD COLUMN privy_id TEXT', // Privy identity — provider console login
   'ALTER TABLE nodes ADD COLUMN price_factor REAL NOT NULL DEFAULT 1.0',
   'ALTER TABLE nodes ADD COLUMN perf REAL NOT NULL DEFAULT 0',
   'ALTER TABLE nodes ADD COLUMN jobs_done INTEGER NOT NULL DEFAULT 0',
@@ -115,6 +131,18 @@ for (const ddl of [
   } catch {
     /* column already present */
   }
+}
+// One GGRID account per Privy identity.
+try {
+  db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_users_privy ON users(privy_id) WHERE privy_id IS NOT NULL')
+} catch {
+  /* index already present */
+}
+// One provider per Privy identity.
+try {
+  db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_providers_privy ON providers(privy_id) WHERE privy_id IS NOT NULL')
+} catch {
+  /* index already present */
 }
 
 export const now = (): number => Date.now()

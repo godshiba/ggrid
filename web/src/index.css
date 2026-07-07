@@ -281,7 +281,7 @@ input[type='range'].rig::-moz-range-thumb {
   z-index: 1;
 }
 /* grid items default to min-width:auto, which refuses to shrink below their
-   content's min-content size — that let fixed-width visuals (460px) blow past
+   content's min-content size - that let fixed-width visuals (460px) blow past
    a narrow viewport. min-width:0 lets each track shrink to fit the phone. */
 .grid2 > * {
   min-width: 0;
@@ -293,6 +293,15 @@ input[type='range'].rig::-moz-range-thumb {
   }
   .grid2 > .order2 {
     order: 0 !important;
+  }
+  /* collapse the header content-page links on narrow screens (still reachable
+     from the console / footer) so the landing header stays uncluttered. */
+  .landing-links {
+    display: none !important;
+  }
+  /* earnings calculator: stack inputs above the result on narrow screens */
+  .calc-grid {
+    grid-template-columns: 1fr !important;
   }
 }
 @media (max-width: 640px) {
@@ -310,6 +319,373 @@ input[type='range'].rig::-moz-range-thumb {
   .console-brand-text {
     display: none !important;
   }
+}
+
+/* ---------- docs: RunPod-style three-column layout ---------- */
+.docs-grid {
+  display: grid;
+  grid-template-columns: 268px minmax(0, 1fr) 232px;
+  align-items: start;
+  position: relative;
+  z-index: 1;
+}
+/* left nav + right toc: sticky, own scroll under the 58px sticky header */
+.docs-side,
+.docs-toc {
+  position: sticky;
+  top: 58px;
+  align-self: start;
+  max-height: calc(100vh - 58px);
+  overflow-y: auto;
+  scrollbar-width: thin;
+}
+.docs-side {
+  padding: 28px 20px 48px max(20px, 5vw);
+  border-right: 1px solid rgba(140, 158, 176, 0.12);
+}
+.docs-toc {
+  padding: 32px max(20px, 4vw) 48px 12px;
+}
+.docs-main {
+  position: relative;
+  z-index: 1;
+  min-width: 0;
+  padding: 44px 48px 100px;
+}
+.docs-navlink:hover {
+  color: #cfe9f2 !important;
+  background: rgba(95, 212, 226, 0.06) !important;
+}
+/* mobile-only jump nav (shown when the side rails collapse) */
+.docs-mobile-nav {
+  display: none;
+  gap: 8px;
+  overflow-x: auto;
+  padding-bottom: 16px;
+  margin-bottom: 22px;
+  border-bottom: 1px solid rgba(140, 158, 176, 0.12);
+}
+.docs-side::-webkit-scrollbar,
+.docs-toc::-webkit-scrollbar {
+  width: 6px;
+}
+.docs-side::-webkit-scrollbar-thumb,
+.docs-toc::-webkit-scrollbar-thumb {
+  background: rgba(140, 158, 176, 0.2);
+  border-radius: 3px;
+}
+@media (max-width: 1180px) {
+  .docs-grid {
+    grid-template-columns: 250px minmax(0, 1fr);
+  }
+  .docs-toc {
+    display: none;
+  }
+  .docs-main {
+    padding: 40px 40px 90px;
+  }
+}
+@media (max-width: 860px) {
+  .docs-grid {
+    grid-template-columns: 1fr;
+  }
+  .docs-side {
+    display: none;
+  }
+  .docs-main {
+    padding: 30px 6vw 80px;
+  }
+  .docs-mobile-nav {
+    display: flex;
+  }
+}
+
+/* ---------- GPU pricing catalogue (vast.ai-style cards) ---------- */
+/* fixed 3-per-row on desktop → 2 on tablet → 1 on phone */
+.gpu-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 18px;
+}
+.gpu-card {
+  transition: border-color 0.2s, box-shadow 0.2s, transform 0.2s;
+}
+.gpu-card:hover {
+  border-color: rgba(95, 212, 226, 0.4) !important;
+  box-shadow: 0 0 22px rgba(95, 212, 226, 0.08);
+  transform: translateY(-2px);
+}
+@media (max-width: 900px) {
+  .gpu-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+@media (max-width: 600px) {
+  .gpu-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* ---------- signature grain (scoped to pages/dashboards, not the 3D landing) ---------- */
+.console-enter::after {
+  content: '';
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  opacity: 0.05;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.8' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+}
+/* grain is static now — the old stepped drift snapped every 2s and read as
+   flickering. A still 4%-opacity grain still adds texture without the twitch. */
+
+/* reusable accent treatments so blocks aren't all identical */
+.panel-feature {
+  position: relative;
+  overflow: hidden;
+}
+.panel-feature::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 46px;
+  height: 2px;
+  background: var(--accent);
+}
+/* frosted glass panels — no fill color, real depth from blur + edge light,
+   lift + accent glow on hover. Overrides inline PANEL bg/border via !important. */
+.glass-panel {
+  position: relative;
+  overflow: hidden;
+  background: rgba(16, 22, 30, 0.5) !important;
+  border: 1px solid rgba(160, 180, 200, 0.14) !important;
+  backdrop-filter: blur(18px) saturate(125%);
+  -webkit-backdrop-filter: blur(18px) saturate(125%);
+  box-shadow: 0 10px 34px rgba(0, 0, 0, 0.28),
+    inset 0 1px 0 rgba(255, 255, 255, 0.07) !important;
+  transition: transform 0.4s cubic-bezier(0.2, 0.8, 0.2, 1), box-shadow 0.4s ease,
+    border-color 0.4s ease;
+  will-change: transform;
+}
+/* a single hairline of light skimming the top edge — the "glass" tell */
+.glass-panel::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 12%;
+  right: 12%;
+  height: 1px;
+  background: rgba(255, 255, 255, 0.22);
+  opacity: 0.6;
+  pointer-events: none;
+  transition: opacity 0.4s ease;
+}
+.glass-panel:hover {
+  transform: translateY(-5px);
+  border-color: rgba(95, 212, 226, 0.4) !important;
+  box-shadow: 0 20px 52px rgba(0, 0, 0, 0.4), 0 0 24px rgba(95, 212, 226, 0.13),
+    inset 0 1px 0 rgba(255, 255, 255, 0.1) !important;
+}
+.glass-panel:hover::after {
+  opacity: 1;
+}
+@media (prefers-reduced-motion: reduce) {
+  .glass-panel {
+    transition: none;
+  }
+  .glass-panel:hover {
+    transform: none;
+  }
+}
+
+/* dashboard Overview — glass-bento grid (6-col; collapses to 2 then 1) */
+.bento {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 18px;
+}
+@media (max-width: 1120px) {
+  .bento {
+    grid-template-columns: 1fr 1fr;
+  }
+  .bento > * {
+    grid-column: auto !important;
+  }
+}
+@media (max-width: 680px) {
+  .bento {
+    grid-template-columns: 1fr;
+  }
+}
+.shortcut-tile {
+  transition: transform 0.2s, border-color 0.2s, background 0.2s, color 0.2s;
+}
+.shortcut-tile:hover {
+  transform: translateY(-2px);
+  border-color: rgba(255, 255, 255, 0.16) !important;
+  background: #23262e !important;
+  color: #eaf4ff !important;
+}
+
+/* dashboard Overview — asymmetric bento (hero balance + stacked stats) */
+.ov-bento {
+  display: grid;
+  grid-template-columns: 1.7fr 1fr;
+  grid-auto-rows: 1fr;
+  gap: 16px;
+}
+.ov-bento .ov-hero {
+  grid-row: span 2;
+}
+@media (max-width: 620px) {
+  .ov-bento {
+    grid-template-columns: 1fr;
+  }
+  .ov-bento .ov-hero {
+    grid-row: auto;
+  }
+}
+
+/* ---------- console dashboard: sidebar layout ---------- */
+.dash-grid {
+  display: grid;
+  grid-template-columns: 250px minmax(0, 1fr);
+  min-height: 100vh;
+  position: relative;
+  z-index: 1;
+}
+/* the column stretches the full page height so its border/bg reach the bottom */
+.dash-side {
+  border-right: 1px solid rgba(255, 255, 255, 0.06);
+  background: #0c0d11;
+}
+/* the nav itself sticks within that column */
+.dash-side-inner {
+  position: sticky;
+  top: 0;
+  height: 100vh;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  padding: 22px 16px;
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  scrollbar-width: thin;
+}
+.dash-switch {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4px;
+  background: rgba(6, 9, 12, 0.6);
+  border: 1px solid rgba(140, 158, 176, 0.16);
+  border-radius: 10px;
+  padding: 4px;
+}
+.dash-switch-btn {
+  text-align: center;
+  font-family: var(--mono);
+  font-size: 11.5px;
+  letter-spacing: 0.04em;
+  padding: 7px 6px;
+  border-radius: 7px;
+  text-decoration: none;
+  transition: background 0.2s, color 0.2s;
+}
+.dash-navlink {
+  text-align: left;
+  font-family: var(--display);
+  font-size: 14.5px;
+  padding: 8px 12px;
+  border-radius: 8px;
+  cursor: pointer;
+  border: none;
+  background: transparent;
+  transition: background 0.2s, color 0.2s;
+}
+.dash-navlink:hover {
+  color: #cfe9f2 !important;
+  background: rgba(95, 212, 226, 0.06) !important;
+}
+.dash-main {
+  position: relative;
+  z-index: 1;
+  min-width: 0;
+}
+.dash-topbar {
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 18px 40px;
+  background: rgba(10, 11, 14, 0.9);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+}
+.dash-content {
+  padding: 32px 40px 48px;
+  max-width: 1760px;
+}
+@media (max-width: 820px) {
+  .dash-grid {
+    grid-template-columns: 1fr;
+  }
+  .dash-side {
+    border-right: none;
+    border-bottom: 1px solid rgba(140, 158, 176, 0.14);
+  }
+  /* on mobile the sidebar stacks on top - don't pin it full-height */
+  .dash-side-inner {
+    position: static;
+    height: auto;
+  }
+  .dash-content {
+    padding: 24px 6vw 56px;
+  }
+  .dash-topbar {
+    padding: 14px 6vw;
+  }
+}
+
+/* ---------- $GGRID contract-address badge (header) ---------- */
+.ca-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-family: var(--mono);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  line-height: 1;
+  color: #cfe9ee;
+  background: rgba(95, 212, 226, 0.06);
+  border: 1px solid rgba(95, 212, 226, 0.28);
+  border-radius: 8px;
+  padding: 8px 11px;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.25s, border-color 0.25s, color 0.25s, box-shadow 0.25s;
+}
+.ca-badge:hover {
+  background: rgba(95, 212, 226, 0.12);
+  border-color: rgba(95, 212, 226, 0.55);
+  box-shadow: 0 0 14px rgba(95, 212, 226, 0.18);
+}
+.ca-badge:active {
+  transform: translateY(1px);
+}
+.ca-badge__tag {
+  font-size: 9px;
+  letter-spacing: 0.18em;
+  color: #5fd4e2;
+  opacity: 0.85;
+}
+.ca-badge__addr {
+  color: #eef4fb;
+  font-weight: 500;
 }
 
 /* ---------- hover states (inline styles can't express :hover) ---------- */

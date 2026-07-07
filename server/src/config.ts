@@ -47,6 +47,10 @@ export const config = {
   // CORS origin for the dashboard / API. '*' for MVP.
   corsOrigin: process.env.CORS_ORIGIN ?? '*',
 
+  // Privy App ID — the console's login/identity provider. Public value (also lives
+  // in the frontend); used to verify Privy access tokens against Privy's JWKS.
+  privyAppId: process.env.PRIVY_APP_ID ?? 'cmraq7xzq00i60cjv2vahcpsm',
+
   // Abort a node request that exceeds this (covers cold generations).
   upstreamTimeoutMs: num(process.env.UPSTREAM_TIMEOUT_MS, 180_000),
 
@@ -60,6 +64,10 @@ export const config = {
   // Default false: free signups can't drain the cloud budget.
   freeTierRunpod: process.env.FREE_TIER_RUNPOD === 'true',
 
+  // DEV ONLY: enable a no-wallet, no-chain simulated top-up (POST /api/credits/dev-topup)
+  // so the funding flow can be tested locally. Default false — never set in prod.
+  devMockTopup: process.env.DEV_MOCK_TOPUP === '1',
+
   // Where the built web app lives (served by the same container in prod).
   webDir: process.env.WEB_DIR ?? '../web/dist',
 
@@ -69,7 +77,7 @@ export const config = {
     programId: process.env.GGRID_PROGRAM_ID ?? '',
     mint: process.env.GGRID_MINT ?? '',
     // Authority keypair: a JSON secret-key array OR a path to a keypair file.
-    // Keep this in the deploy platform Secrets, never in the repo.
+    // Keep this in Forgejo Secrets, never in the repo.
     authorityKey: process.env.GGRID_AUTHORITY_KEY ?? '',
     // 'token2022' (self-issued Token-2022) or 'token' (classic / pump.fun SPL).
     tokenProgram: (process.env.GGRID_TOKEN_PROGRAM ?? 'token2022') as 'token2022' | 'token',
@@ -81,6 +89,10 @@ export const config = {
     providerBps: num(process.env.GGRID_PROVIDER_BPS, 7500),
     // Don't pay out below this many credits (avoids dust + fee waste).
     minPayoutCredits: num(process.env.GGRID_MIN_PAYOUT_CREDITS, 100_000),
+    // $GGRID mint decimals — needed to build the deposit `transfer_checked`.
+    decimals: num(process.env.GGRID_MINT_DECIMALS, 6),
+    // Don't credit a top-up worth fewer than this many credits (dust guard).
+    minDepositCredits: num(process.env.GGRID_MIN_DEPOSIT_CREDITS, 0),
   },
 }
 

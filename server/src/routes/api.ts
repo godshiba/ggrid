@@ -4,6 +4,11 @@ import {
   createUser,
   issueApiKey,
   getUser,
+  getUserByPrivyId,
+  createUserWithPrivy,
+  getProviderByPrivyId,
+  createProviderWithPrivy,
+  rotateProviderToken,
   sha256,
   randToken,
   requireUser,
@@ -11,11 +16,14 @@ import {
   requireAdmin,
   type Env,
 } from '../auth'
-import { onlineCount, onlineModels, dropNode, nodeStats } from '../registry'
+import { verifyPrivyToken } from '../privy'
+import { onlineCount, onlineModels, dropNode, nodeStats, listNodes } from '../registry'
 import { allowSignup } from '../ratelimit'
 import { config } from '../config'
-import { solanaEnabled } from '../solana'
+import { solanaEnabled, solanaReadable, getWalletBalance } from '../solana'
 import { requestPayout } from '../payouts'
+import { createIntent, checkIntent } from '../deposits'
+import { priceTable, defaultPrice } from '../pricing'
 import type { NodeRow } from '../types'
 
 function clientIp(c: any): string {
@@ -51,6 +59,42 @@ api.post('/providers', async (c) => {
     now(),
   )
   return c.json({ providerId: id, providerToken: token })
+})
+
+// ---------- Privy login exchange ----------
+// The console logs in with Privy, then posts the Privy access token here. We
+// find-or-create the GGRID account tied to that Privy identity; on first login
+// it gets the free-credit bonus + a default API key (returned once). Afterwards
+// the console authenticates its calls with the Privy token directly (requireUser).
+api.post('/auth/privy', async (c) => {
+  const body = await c.req.json().catch(() => ({}))
+  const claims = await verifyPrivyToken(String(body?.token ?? ''))
+  if (!claims) return c.json({ error: { message: 'invalid or expired Privy session', type: 'auth' } }, 401)
+
+  const existing = getUserByPrivyId(claims.privyId)
+  if (existing) return c.json({ userId: existing.id, balance: existing.balance, isNew: false })
+
+  // new account — same per-IP anti-abuse cap as /signup
+  if (!allowSignup(clientIp(c)))
+    return c.json({ error: { message: 'signup limit reached for your network, try later', type: 'rate_limit' } }, 429)
+  const user = createUserWithPrivy(claims.privyId, null, config.signupBonus)
+  const { key } = issueApiKey(user.id, 'default')
+  return c.json({ userId: user.id, balance: user.balance, apiKey: key, isNew: true })
+})
+
+// Provider console login via Privy: find-or-create the provider tied to this Privy
+// identity. On first login we return the node token once (for the installer);
+// afterwards the console authenticates with the Privy token directly (requireProvider).
+api.post('/auth/privy-provider', async (c) => {
+  const body = await c.req.json().catch(() => ({}))
+  const claims = await verifyPrivyToken(String(body?.token ?? ''))
+  if (!claims) return c.json({ error: { message: 'invalid or expired Privy session', type: 'auth' } }, 401)
+
+  const existing = getProviderByPrivyId(claims.privyId)
+  if (existing) return c.json({ providerId: existing.id, isNew: false })
+
+  const { provider, token } = createProviderWithPrivy(claims.privyId)
+  return c.json({ providerId: provider.id, providerToken: token, isNew: true })
 })
 
 // ---------- developer (API-key auth) ----------
@@ -109,6 +153,14 @@ api.get('/provider/earnings', requireProvider, (c) => {
   })
 })
 
+// Issue/rotate the node token used by the installer (PROVIDER_TOKEN=...). Needed
+// because a Privy-logged-in provider never sees a raw token otherwise; the old
+// token stops working for new registrations, live nodes are unaffected.
+api.post('/provider/node-token', requireProvider, (c) => {
+  const token = rotateProviderToken(c.get('provider').id)
+  return c.json({ providerToken: token })
+})
+
 // Set the Solana wallet that on-chain $GGRID payouts are sent to.
 api.post('/provider/wallet', requireProvider, async (c) => {
   const body = await c.req.json().catch(() => ({}))
@@ -132,6 +184,100 @@ api.get('/provider/payouts', requireProvider, (c) => {
     )
     .all(c.get('provider').id)
   return c.json({ payouts, payoutsEnabled: solanaEnabled() })
+})
+
+// ---------- developer: buy credits with $GGRID (on-chain top-up) ----------
+// intent → returns an unsigned deposit tx + a reference; the wallet signs+sends it.
+api.post('/credits/intent', requireUser, async (c) => {
+  const body = await c.req.json().catch(() => ({}))
+  const r = await createIntent(c.get('user').id, String(body?.wallet ?? ''), Number(body?.tokens))
+  return c.json(r.body as object, r.status as 200)
+})
+
+// status → polled after sending; finds the on-chain deposit and credits the user.
+api.get('/credits/status', requireUser, async (c) => {
+  const reference = String(c.req.query('reference') ?? '')
+  if (!reference) return c.json({ error: 'reference required' }, 400)
+  const r = await checkIntent(c.get('user').id, reference)
+  return c.json(r.body as object, r.status as 200)
+})
+
+// DEV ONLY: simulate a $GGRID deposit with no wallet / no chain, so the funding
+// flow is testable on a local stand. Disabled unless DEV_MOCK_TOPUP=1 (never prod).
+api.post('/credits/dev-topup', requireUser, async (c) => {
+  if (!config.devMockTopup) return c.json({ error: 'not found' }, 404)
+  const body = await c.req.json().catch(() => ({}))
+  const tokens = Number(body?.tokens)
+  if (!Number.isFinite(tokens) || tokens <= 0) return c.json({ error: 'positive tokens required' }, 400)
+  // Mirror createIntent() exactly: rawAmount = tokens × 10^decimals, credits = rawAmount / rawPerCredit.
+  const rawAmount = BigInt(Math.round(tokens * 10 ** config.solana.decimals))
+  const credits = Number(rawAmount / BigInt(config.solana.rawPerCredit))
+  if (credits <= 0) return c.json({ error: 'amount too small' }, 400)
+  const userId = c.get('user').id
+  db.transaction(() => {
+    db.query('UPDATE users SET balance = balance + ?, runpod_allowed = 1 WHERE id = ?').run(credits, userId)
+    db.query('INSERT INTO ledger (id,type,amount,user_id,created_at) VALUES (?,?,?,?,?)').run(
+      uid('led_'),
+      'DEPOSIT',
+      credits,
+      userId,
+      now(),
+    )
+  })()
+  return c.json({ status: 'CONFIRMED', credits, balance: getUser(userId)!.balance, dev: true })
+})
+
+// ---------- public: on-chain $GGRID wallet balance ----------
+// The REAL token balance sitting in a Solana wallet, read live from chain. This is
+// distinct from the user's off-chain spendable credit balance (/api/me): it's what
+// they actually hold on-chain and can deposit. `available:false` when the gateway
+// has no RPC/mint configured (e.g. token not live) — the UI degrades gracefully.
+api.get('/wallet/balance', async (c) => {
+  const wallet = String(c.req.query('wallet') ?? '').trim()
+  if (!/^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(wallet))
+    return c.json({ error: 'valid Solana wallet address required' }, 400)
+  if (!solanaReadable()) return c.json({ available: false, wallet })
+  try {
+    const b = await getWalletBalance(wallet)
+    return c.json({ available: true, wallet, ...b })
+  } catch (e) {
+    return c.json({ available: false, wallet, error: String((e as Error)?.message ?? e).slice(0, 200) })
+  }
+})
+
+// ---------- public: pricing + plan limits (powers the pricing/docs pages) ----------
+api.get('/pricing', (c) => {
+  return c.json({
+    // 1 credit = 1 micro-USD; prices below are credits per 1,000,000 tokens.
+    creditUnitUsd: 0.000001,
+    models: priceTable(),
+    defaultPrice,
+    // $GGRID conversion so the UI can show balances/costs in tokens.
+    // tokens = credits × tokensPerCredit (= rawPerCredit / 10^decimals).
+    ggrid: {
+      rawPerCredit: config.solana.rawPerCredit,
+      decimals: config.solana.decimals,
+      tokensPerCredit: config.solana.rawPerCredit / 10 ** config.solana.decimals,
+    },
+    // Fee split applied to every job (percent).
+    feeSplit: { providerPct: 75, burnPct: 12.5, stakersPct: 7.5, treasuryPct: 5 },
+    free: {
+      signupBonusCredits: config.signupBonus,
+      signupBonusUsd: config.signupBonus / 1_000_000,
+      rateLimitPerMin: config.rateLimitPerMin,
+      signupsPerIpPerDay: config.signupPerIpPerDay,
+      maxOutputTokens: config.maxOutputTokens,
+      communityGpusOnly: !config.freeTierRunpod, // free tier can't spend the paid cloud budget
+    },
+  })
+})
+
+// ---------- public: GPU marketplace ----------
+// Safe catalogue of live GPUs so developers can pick a node to pin (via the
+// x-ggrid-node header). Never exposes node url/secret. ?all=1 includes offline.
+api.get('/nodes', (c) => {
+  const includeOffline = c.req.query('all') === '1'
+  return c.json({ nodes: listNodes({ includeOffline }) })
 })
 
 // ---------- public: network stats ----------

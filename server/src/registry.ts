@@ -119,3 +119,72 @@ export function nodeStats(n: NodeRow) {
     quarantined: n.reliability < config.minReliability,
   }
 }
+
+// Human-readable GPU name from the (nullable) gpu_info JSON. Providers send
+// `{ name: 'RTX 4090', ... }` at register time; older/RunPod nodes have none.
+export function gpuLabel(n: NodeRow): string {
+  if (!n.gpu_info) return 'Unknown GPU'
+  try {
+    const info = JSON.parse(n.gpu_info) as unknown
+    // Shell installer sends the raw name string; the PS/richer path sends an object.
+    if (typeof info === 'string') return info.trim() || 'Unknown GPU'
+    if (info && typeof info === 'object') {
+      const rec = info as Record<string, unknown>
+      const name = rec.name ?? rec.gpu ?? rec.model
+      if (typeof name === 'string' && name.trim()) return name.trim()
+    }
+    return 'Unknown GPU'
+  } catch {
+    return 'Unknown GPU'
+  }
+}
+
+// Safe, public catalogue of nodes for the GPU marketplace. Never leaks url or
+// secrets — only what a developer needs to pick a GPU. Online nodes first, then
+// cheapest/fastest, so the picker reads top-to-bottom like the auto-router.
+export function listNodes(opts: { includeOffline?: boolean } = {}) {
+  const rows = db.query('SELECT * FROM nodes').all() as NodeRow[]
+  return rows
+    .map((n) => {
+      const l = live.get(n.id)
+      const online = isOnline(n.id)
+      const activeJobs = l?.activeJobs ?? 0
+      const freeSlots = Math.max(0, config.maxConcurrencyPerNode - activeJobs)
+      return {
+        id: n.id,
+        gpu: gpuLabel(n),
+        source: n.source,
+        models: JSON.parse(n.models) as string[],
+        priceFactor: n.price_factor,
+        reliability: Math.round(n.reliability * 100) / 100,
+        perfTokensPerSec: Math.round(n.perf * 10) / 10,
+        uptimePct: uptimePct(n.id),
+        activeJobs,
+        freeSlots,
+        online,
+        quarantined: n.reliability < config.minReliability,
+      }
+    })
+    .filter((n) => opts.includeOffline || n.online)
+    .sort((a, b) => {
+      if (a.online !== b.online) return a.online ? -1 : 1
+      if (a.priceFactor !== b.priceFactor) return a.priceFactor - b.priceFactor
+      if (a.perfTokensPerSec !== b.perfTokensPerSec) return b.perfTokensPerSec - a.perfTokensPerSec
+      return b.reliability - a.reliability
+    })
+}
+
+// Resolve a developer-pinned node for a request. Returns the row to proxy to,
+// or an error string explaining why the pin can't be honored (→ 409, no
+// silent fallback: the choice was explicit).
+export function nodeForRequest(nodeId: string, model: string): { node: NodeRow } | { error: string } {
+  const n = getNode(nodeId)
+  if (!n) return { error: `unknown GPU node '${nodeId}'` }
+  const models = JSON.parse(n.models) as string[]
+  if (!models.includes(model)) return { error: `GPU '${nodeId}' does not serve model '${model}'` }
+  if (!isOnline(n.id)) return { error: `GPU '${nodeId}' is offline` }
+  if (n.reliability < config.minReliability) return { error: `GPU '${nodeId}' is quarantined` }
+  const active = live.get(n.id)?.activeJobs ?? 0
+  if (active >= config.maxConcurrencyPerNode) return { error: `GPU '${nodeId}' is at capacity` }
+  return { node: n }
+}

@@ -1,6 +1,7 @@
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import compression from 'vite-plugin-compression'
+import { nodePolyfills } from 'vite-plugin-node-polyfills'
 
 // Static build → dist/ (served directly by the deploy platform).
 // gzip + brotli are emitted alongside assets so the server can ship the
@@ -9,6 +10,9 @@ import compression from 'vite-plugin-compression'
 export default defineConfig({
   plugins: [
     react(),
+    // @solana/web3.js expects Node's Buffer/global in the browser (used only by
+    // the $GGRID top-up flow). Polyfill just what it needs.
+    nodePolyfills({ include: ['buffer'], globals: { Buffer: true, global: true, process: true } }),
     compression({ algorithm: 'brotliCompress', ext: '.br' }),
     compression({ algorithm: 'gzip', ext: '.gz' }),
   ],

@@ -3,16 +3,63 @@ import Lenis from 'lenis'
 import { scroll } from './scroll'
 import { session } from './session'
 import { api as gateway, type Stats } from './api'
+import Bubbles from './Bubbles'
 
 const compact = (n: number) => new Intl.NumberFormat('en', { notation: 'compact', maximumFractionDigits: 1 }).format(n)
 
 const SceneCanvas = lazy(() => import('./SceneCanvas'))
 const PreloaderScene = lazy(() => import('./SceneCanvas').then((m) => ({ default: m.PreloaderG })))
 const Ocean = lazy(() => import('./Ocean'))
-const Dashboard = lazy(() => import('./Dashboard'))
+const Dashboard = lazy(() => import('./ConsoleRoot')) // Dashboard wrapped in PrivyProvider (console-only chunk)
+const Pages = lazy(() => import('./Pages'))
 
 const X_URL = 'https://x.com/GpuGridApp'
+const GGRID_CA = 'e4gi5NCxK3Eb7HqXV1Rskc3dZtH4hcHTF8dCfa5EASY'
 const MAX_DEPTH = 3500
+
+// Copyable $GGRID contract-address badge shown in the header next to the wordmark.
+function CaBadge() {
+  const [copied, setCopied] = useState(false)
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(GGRID_CA)
+    } catch {
+      const ta = document.createElement('textarea')
+      ta.value = GGRID_CA
+      ta.style.position = 'fixed'
+      ta.style.opacity = '0'
+      document.body.appendChild(ta)
+      ta.select()
+      try { document.execCommand('copy') } catch { /* clipboard unavailable */ }
+      ta.remove()
+    }
+    setCopied(true)
+    window.setTimeout(() => setCopied(false), 1400)
+  }
+  const short = `${GGRID_CA.slice(0, 4)}…${GGRID_CA.slice(-4)}`
+  return (
+    <button
+      type="button"
+      onClick={copy}
+      className="ca-badge"
+      title={copied ? 'Copied!' : `Copy $GGRID contract address\n${GGRID_CA}`}
+      aria-label="Copy $GGRID contract address"
+    >
+      <span className="ca-badge__tag">CA</span>
+      <span className="ca-badge__addr">{short}</span>
+      {copied ? (
+        <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+          <path d="M20 6 9 17l-5-5" />
+        </svg>
+      ) : (
+        <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+          <rect x="9" y="9" width="11" height="11" rx="2" />
+          <path d="M5 15V5a2 2 0 0 1 2-2h10" />
+        </svg>
+      )}
+    </button>
+  )
+}
 
 /* deterministic pseudo-random (matches the handoff source) */
 const _r = (i: number) => {
@@ -682,6 +729,12 @@ function CodeTerminal() {
   )
 }
 
+const SPLIT: [string, string][] = [
+  ['Providers', '75%'],
+  ['Burn', '12.5%'],
+  ['Stakers', '7.5%'],
+  ['Treasury', '5%'],
+]
 function SplitBars() {
   return (
     <Reveal dir="scale" style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
@@ -696,8 +749,8 @@ function SplitBars() {
               marginBottom: 9,
             }}
           >
-            <span style={{ fontSize: 13, color: '#cdd9e4', letterSpacing: '.04em' }}>{label}</span>
-            <b style={{ fontSize: 15, color: '#fff', fontWeight: 700 }}>{pct}</b>
+            <span style={{ fontSize: 14, color: '#cdd9e4', letterSpacing: '.04em' }}>{label}</span>
+            <b style={{ fontSize: 16, color: '#fff', fontWeight: 700 }}>{pct}</b>
           </div>
           <div style={{ height: 7, borderRadius: 4, background: 'rgba(140,158,176,.12)', overflow: 'hidden' }}>
             <div
@@ -709,83 +762,6 @@ function SplitBars() {
       ))}
     </Reveal>
   )
-}
-
-/* ---------- rising bubbles + deep bioluminescence ---------- */
-function Bubbles() {
-  const ref = useRef<HTMLCanvasElement>(null)
-  useEffect(() => {
-    const cv = ref.current
-    if (!cv) return
-    const ctx = cv.getContext('2d')!
-    let W = 0
-    let H = 0
-    let raf = 0
-    const resize = () => {
-      const DPR = Math.min(window.devicePixelRatio || 1, 2)
-      W = window.innerWidth
-      H = window.innerHeight
-      cv.width = W * DPR
-      cv.height = H * DPR
-      cv.style.width = W + 'px'
-      cv.style.height = H + 'px'
-      ctx.setTransform(DPR, 0, 0, DPR, 0, 0)
-    }
-    resize()
-    window.addEventListener('resize', resize)
-    const ps = Array.from({ length: 60 }, () => ({
-      x: Math.random() * W,
-      y: Math.random() * H,
-      r: Math.random() * 2.1 + 0.6,
-      vy: Math.random() * 0.5 + 0.16, // rise speed
-      amp: Math.random() * 0.7 + 0.2, // horizontal wobble
-      ph: Math.random() * 6.283,
-      tw: Math.random() * 6.283, // twinkle phase
-      o: Math.random() * 0.32 + 0.1,
-    }))
-    let tt = 0
-    const draw = () => {
-      ctx.clearRect(0, 0, W, H)
-      tt += 0.016
-      const depth = scroll.progress // 0 surface .. 1 abyss
-      const biolum = Math.max(0, (depth - 0.45) / 0.55) // cyan glow in the twilight zone
-      const ember = Math.max(0, (depth - 0.7) / 0.3) // turns to orange embers near the core
-      for (const p of ps) {
-        p.y -= p.vy
-        p.x += Math.sin(tt * 0.6 + p.ph) * p.amp * 0.5
-        if (p.y < -6) {
-          p.y = H + 6
-          p.x = Math.random() * W
-        }
-        const twinkle = biolum > 0 ? 0.55 + 0.45 * Math.sin(tt * 2.2 + p.tw) : 1
-        const alpha = p.o * twinkle
-        ctx.beginPath()
-        ctx.arc(p.x, p.y, p.r, 0, 6.283)
-        if (ember > 0.05) {
-          // rising embers from the molten core
-          ctx.fillStyle = `rgba(238,150,68,${alpha})`
-          ctx.shadowColor = 'rgba(236,132,48,.95)'
-          ctx.shadowBlur = 7 * ember
-        } else if (biolum > 0.12) {
-          ctx.fillStyle = `rgba(110,226,236,${alpha})`
-          ctx.shadowColor = 'rgba(95,212,226,.9)'
-          ctx.shadowBlur = 5 * biolum
-        } else {
-          ctx.fillStyle = `rgba(176,214,232,${alpha})`
-          ctx.shadowBlur = 0
-        }
-        ctx.fill()
-      }
-      ctx.shadowBlur = 0
-      raf = requestAnimationFrame(draw)
-    }
-    draw()
-    return () => {
-      cancelAnimationFrame(raf)
-      window.removeEventListener('resize', resize)
-    }
-  }, [])
-  return <canvas ref={ref} style={{ position: 'fixed', inset: 0, zIndex: 4, pointerEvents: 'none', display: 'block' }} />
 }
 
 /* ---------- section level marker ---------- */
@@ -1176,24 +1152,44 @@ function Site() {
           borderBottom: '1px solid transparent',
         }}
       >
-        <a href="#top" style={{ display: 'flex', alignItems: 'center', gap: 13, textDecoration: 'none' }}>
-          <img
-            src="/logo.png"
-            alt="GPUGrid"
-            width={40}
-            height={40}
-            style={{ display: 'block', width: 40, height: 40, borderRadius: 9, border: '1px solid rgba(140,158,176,.3)' }}
-          />
-          <span style={{ lineHeight: 1.05 }}>
-            <span style={{ display: 'block', fontFamily: 'var(--display)', fontWeight: 500, letterSpacing: '.16em', fontSize: 15, color: '#eef4fb' }}>
-              GPUGRID
-            </span>
-            <span style={{ display: 'block', fontFamily: 'var(--mono)', fontWeight: 500, fontSize: 10, letterSpacing: '.18em', color: '#5fd4e2', marginTop: 3 }}>
-              $GGRID
-            </span>
-          </span>
-        </a>
         <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
+          <a href="#top" style={{ display: 'flex', alignItems: 'center', gap: 13, textDecoration: 'none' }}>
+            <img
+              src="/logo.png"
+              alt="GPUGrid"
+              width={40}
+              height={40}
+              style={{ display: 'block', width: 40, height: 40, borderRadius: 9, border: '1px solid rgba(140,158,176,.3)' }}
+            />
+            <span style={{ lineHeight: 1.05 }}>
+              <span style={{ display: 'block', fontFamily: 'var(--display)', fontWeight: 500, letterSpacing: '.16em', fontSize: 15, color: '#eef4fb' }}>
+                GPUGRID
+              </span>
+              <span style={{ display: 'block', fontFamily: 'var(--mono)', fontWeight: 500, fontSize: 10, letterSpacing: '.18em', color: '#5fd4e2', marginTop: 3 }}>
+                $GGRID
+              </span>
+            </span>
+          </a>
+          <CaBadge />
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
+          {/* content pages - hidden on narrow screens to keep the header clean */}
+          <nav className="landing-links" style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
+            {[
+              ['#/pricing', 'Pricing'],
+              ['#/docs', 'Docs'],
+              ['#/stats', 'Network'],
+            ].map(([href, label]) => (
+              <a
+                key={href}
+                href={href}
+                className="link-dim"
+                style={{ fontFamily: 'var(--mono)', fontSize: 12, letterSpacing: '.04em', color: '#9fb4c6', textDecoration: 'none', padding: '8px 10px' }}
+              >
+                {label}
+              </a>
+            ))}
+          </nav>
           {/* Always-visible entry to the personal console - styled as an
              outlined button so it reads as clickable, not hidden behind
              "Connect Wallet". */}
@@ -1425,7 +1421,7 @@ function Site() {
             <div>
               <Marker no="//04" name="THE CORE" depth="−3,200 m" core />
               <Reveal delay={90}>
-                <h2 style={H2()}>
+                <h2 style={H2({ fontSize: 'clamp(30px,8.6vw,66px)' })}>
                   <Scramble text="One token" style={{ display: 'block' }} />
                   <Scramble
                     text="powers the grid"
@@ -1439,16 +1435,53 @@ function Site() {
                 </h2>
               </Reveal>
               <Reveal delay={180}>
-                <p style={BODY}>
-                  All the way down at the core, compute is paid in $GGRID. Every job splits four ways - the ore of the network,
-                  distributed.
+                <p style={{ ...BODY, fontSize: 20, maxWidth: 460 }}>
+                  Down at the core, every job is paid in <b style={{ color: '#f0ab54' }}>$GGRID</b> and settled on{' '}
+                  <b style={{ color: '#cdd9e4' }}>Solana</b>. The token is the rail the whole network runs on - not decoration.
                 </p>
               </Reveal>
-              <Reveal delay={260}>
-                <p style={{ margin: '24px 0 0', maxWidth: 420, fontFamily: 'var(--mono)', fontSize: 11, lineHeight: 1.7, color: '#5d6f80' }}>
-                  Status: compute is metered off-chain today. The on-chain payout splitter is written and validated on Solana devnet.
-                  Mainnet launches via pump.fun.
+              <Reveal delay={320}>
+                <p style={{ margin: '26px 0 0', maxWidth: 460, fontFamily: 'var(--mono)', fontSize: 12.5, lineHeight: 1.75, color: '#8fa3b5' }}>
+                  Settlement runs on Solana. Compute is metered off-chain today; the on-chain payout splitter is written and
+                  validated on devnet - deposits into the vault and provider payouts are live-tested there.
                 </p>
+              </Reveal>
+              <Reveal delay={340}>
+                <div
+                  style={{
+                    marginTop: 30,
+                    maxWidth: 440,
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 14,
+                    padding: '16px 18px',
+                    border: '1px solid rgba(95,212,226,.22)',
+                    borderRadius: 12,
+                    background: 'rgba(95,212,226,.045)',
+                  }}
+                >
+                  <div>
+                    <div style={{ fontFamily: 'var(--mono)', fontSize: 10, letterSpacing: '.22em', color: '#5fd4e2', marginBottom: 6 }}>STAKING</div>
+                    <div style={{ fontFamily: 'var(--display)', fontWeight: 300, fontSize: 16, color: '#cdd9e4', lineHeight: 1.4 }}>
+                      Stake $GGRID, earn a share of every job
+                    </div>
+                  </div>
+                  <span
+                    style={{
+                      marginLeft: 'auto',
+                      fontFamily: 'var(--mono)',
+                      fontSize: 10,
+                      letterSpacing: '.14em',
+                      color: '#06080b',
+                      background: '#5fd4e2',
+                      padding: '5px 10px',
+                      borderRadius: 20,
+                      whiteSpace: 'nowrap',
+                    }}
+                  >
+                    SOON
+                  </span>
+                </div>
               </Reveal>
             </div>
             <SplitBars />
@@ -1561,6 +1594,13 @@ export default function App() {
     return (
       <Suspense fallback={null}>
         <Dashboard tab={route} />
+      </Suspense>
+    )
+  }
+  if (route === 'pricing' || route === 'docs' || route === 'stats') {
+    return (
+      <Suspense fallback={null}>
+        <Pages page={route} />
       </Suspense>
     )
   }

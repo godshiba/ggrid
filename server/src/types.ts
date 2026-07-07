@@ -27,6 +27,7 @@ export interface ProviderRow {
   token_hash: string
   payout_wallet: string | null
   balance: number
+  privy_id: string | null
   created_at: number
 }
 

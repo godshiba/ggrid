@@ -172,6 +172,28 @@ check('payout without Solana config → 503', payoutOff.status === 503)
 const phist = await (await call('/api/provider/payouts', { headers: provAuth })).json()
 check('payouts history is empty + flagged disabled', Array.isArray(phist.payouts) && phist.payouts.length === 0 && phist.payoutsEnabled === false)
 
+// --- GPU marketplace: public catalogue + pinning a specific node ---
+const regGpu = await (await jpost('/nodes/register', { url: mockUrl, models: ['gemma2:9b'], gpuInfo: 'NVIDIA RTX 4090', providerToken: pv.providerToken })).json()
+await jpost(`/nodes/${regGpu.nodeId}/heartbeat`, { models: ['gemma2:9b'] }, { 'x-node-secret': regGpu.nodeSecret })
+const cat = await (await call('/api/nodes')).json()
+const listed = cat.nodes.find((n: any) => n.id === regGpu.nodeId)
+check('/api/nodes lists the online node', !!listed)
+check('/api/nodes shows GPU label from gpuInfo', listed?.gpu === 'NVIDIA RTX 4090')
+check('/api/nodes never leaks url/secret', listed && !('url' in listed) && !('secret_hash' in listed))
+check('/api/nodes reports free slots', typeof listed?.freeSlots === 'number' && listed.freeSlots > 0)
+// pin to that exact node → served
+const pinOk = await jpost('/v1/chat/completions', { model: 'gemma2:9b', messages: [{ role: 'user', content: 'hi' }] }, { ...auth, 'x-ggrid-node': regGpu.nodeId })
+check('pinned request to a valid node → 200', pinOk.status === 200)
+// pin to a node that doesn't serve the model → 409, no fallback
+const pinWrongModel = await jpost('/v1/chat/completions', { model: 'llama3:8b', messages: [{ role: 'user', content: 'hi' }] }, { ...auth, 'x-ggrid-node': regGpu.nodeId })
+check('pin to node not serving the model → 409', pinWrongModel.status === 409)
+// pin to an unknown node id → 409
+const pinUnknown = await jpost('/v1/chat/completions', { model: 'llama3:8b', messages: [{ role: 'user', content: 'hi' }] }, { ...auth, 'x-ggrid-node': 'nod_does_not_exist' })
+check('pin to unknown node → 409', pinUnknown.status === 409)
+// pin via the body `node` field works too (and is stripped, not forwarded)
+const pinBody = await jpost('/v1/chat/completions', { model: 'gemma2:9b', node: regGpu.nodeId, messages: [{ role: 'user', content: 'hi' }] }, auth)
+check('pin via body.node field → 200', pinBody.status === 200)
+
 // --- stats ---
 const stats = await (await call('/api/stats')).json()
 check('stats.totalJobs >= 3', stats.totalJobs >= 3)

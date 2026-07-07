@@ -58,8 +58,14 @@ done
 info "Your node URL: $PUBLIC_URL"
 
 # --- 4. register ---
+# Best-effort GPU name so the node shows up labelled in the marketplace.
+GPU=""
+if command -v nvidia-smi >/dev/null 2>&1; then
+  GPU="$(nvidia-smi --query-gpu=name --format=csv,noheader 2>/dev/null | head -n1)"
+fi
+GPU="$(printf '%s' "$GPU" | tr -d '"')"
 REG="$(curl -fsS -X POST "$GATEWAY/nodes/register" -H "content-type: application/json" \
-  -d "{\"url\":\"$PUBLIC_URL\",\"models\":$(models_json),\"providerToken\":\"$PROVIDER_TOKEN\"}")"
+  -d "{\"url\":\"$PUBLIC_URL\",\"models\":$(models_json),\"gpuInfo\":\"$GPU\",\"providerToken\":\"$PROVIDER_TOKEN\"}")"
 NODE_ID="$(echo "$REG"   | grep -oE '"nodeId":"[^"]+"'     | sed 's/"nodeId":"//; s/"$//')"
 NODE_SECRET="$(echo "$REG" | grep -oE '"nodeSecret":"[^"]+"' | sed 's/"nodeSecret":"//; s/"$//')"
 [ -n "$NODE_ID" ] || { echo "Registration failed: $REG"; kill "$CF_PID" 2>/dev/null || true; exit 1; }
