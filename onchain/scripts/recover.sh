@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Teardown — return ALL SOL from the GpuGrid on-chain deployment back to your wallet.
+# Teardown - return ALL SOL from the GpuGrid on-chain deployment back to your wallet.
 #
 # Order matters:
 #   1. recover.ts  -> closes the program's accounts (config PDA + vault + treasury/stakers)
@@ -10,7 +10,7 @@
 #   PROGRAM_ID=<program id> RECIPIENT=<wallet pubkey to receive SOL> \
 #   AUTHORITY_KEYPAIR=~/.config/solana/id.json bash recover.sh
 #
-# Use RPC_URL to pick the network (defaults to devnet — change for mainnet).
+# Use RPC_URL to pick the network (defaults to devnet - change for mainnet).
 set -euo pipefail
 
 RPC="${RPC_URL:-https://api.devnet.solana.com}"
@@ -50,4 +50,4 @@ fi
 
 echo "balance after: $(solana balance -k "$KEYPAIR" --url "$RPC")"
 echo "recipient balance: $(solana balance "$RECIPIENT" --url "$RPC")"
-echo "done — everything reclaimable has been returned."
+echo "done - everything reclaimable has been returned."

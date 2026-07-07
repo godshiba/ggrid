@@ -4,7 +4,7 @@ import { createHash } from 'node:crypto'
 import { config, solanaConfigured } from './config'
 
 // On-chain payout client for the ggrid_payout program. Heavy Solana deps are
-// imported lazily so the gateway boots (and tests run) without them installed —
+// imported lazily so the gateway boots (and tests run) without them installed -
 // they're only pulled in the first time a payout is actually attempted.
 //
 // Disabled cleanly when the Solana env isn't set (see solanaConfigured()).
@@ -45,7 +45,7 @@ async function readClient(): Promise<ReadClient> {
 }
 
 // Read a wallet's real on-chain $GGRID balance. Returns 0 (not an error) when the
-// wallet has no associated token account yet — that just means it never held any.
+// wallet has no associated token account yet - that just means it never held any.
 // A pure public chain read; never touches the authority key.
 export async function getWalletBalance(
   walletAddress: string,
@@ -161,7 +161,7 @@ function anchorDiscriminator(name: string): Buffer {
   return createHash('sha256').update(`global:${name}`).digest().subarray(0, 8)
 }
 
-// A fresh, unguessable reference pubkey (never signs — used only as a tx marker).
+// A fresh, unguessable reference pubkey (never signs - used only as a tx marker).
 export async function createReference(): Promise<string> {
   const c = await client()
   return c.web3.Keypair.generate().publicKey.toBase58()
@@ -219,7 +219,7 @@ export async function buildDepositTransaction(
     { pubkey: new PublicKey(c.cfg.vault), isSigner: false, isWritable: true },
     { pubkey: c.tokenProgram, isSigner: false, isWritable: false },
     { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
-    // trailing reference — Anchor drops extras into remaining_accounts (ignored),
+    // trailing reference - Anchor drops extras into remaining_accounts (ignored),
     // but getSignaturesForAddress(reference) can then find this exact payment.
     { pubkey: ref, isSigner: false, isWritable: false },
   ]

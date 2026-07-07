@@ -1,5 +1,5 @@
 #!/usr/bin/env bun
-// GpuGrid node agent — connects a provider's local Ollama to the grid.
+// GpuGrid node agent - connects a provider's local Ollama to the grid.
 //
 //   bun index.ts --public-url https://xxxx.ngrok.app --provider-token ggrid_pv_...
 //

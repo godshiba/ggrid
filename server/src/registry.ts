@@ -140,7 +140,7 @@ export function gpuLabel(n: NodeRow): string {
 }
 
 // Safe, public catalogue of nodes for the GPU marketplace. Never leaks url or
-// secrets — only what a developer needs to pick a GPU. Online nodes first, then
+// secrets - only what a developer needs to pick a GPU. Online nodes first, then
 // cheapest/fastest, so the picker reads top-to-bottom like the auto-router.
 export function listNodes(opts: { includeOffline?: boolean } = {}) {
   const rows = db.query('SELECT * FROM nodes').all() as NodeRow[]

@@ -44,7 +44,7 @@ interface Attempt {
 }
 
 // Run one job against one node. Returns a Response on success (or a definitive
-// answer). Returns null if the node failed BEFORE producing output — the caller
+// answer). Returns null if the node failed BEFORE producing output - the caller
 // may then retry on a different node. Billing happens here on completion.
 export async function tryProxy(a: Attempt): Promise<Response | null> {
   const { userId, node, model, body, endpoint } = a

@@ -1,5 +1,5 @@
 /**
- * Backend settlement helper — this is how the GpuGrid gateway turns an off-chain
+ * Backend settlement helper - this is how the GpuGrid gateway turns an off-chain
  * ledger entry into an on-chain payout.
  *
  * Wiring (do this after `anchor deploy` + `initialize`):

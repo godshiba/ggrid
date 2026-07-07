@@ -19,7 +19,7 @@ function userBalance(userId: string): number {
   return (db.query('SELECT balance FROM users WHERE id=?').get(userId) as { balance: number } | undefined)?.balance ?? 0
 }
 
-// Step 1 — the developer picks an amount and connects a wallet. We mint a unique
+// Step 1 - the developer picks an amount and connects a wallet. We mint a unique
 // reference, build the (unsigned) deposit tx server-side, and hand both back. The
 // wallet signs + sends the tx; nothing is credited yet.
 export async function createIntent(userId: string, wallet: string, tokens: number): Promise<DepositResult> {
@@ -52,7 +52,7 @@ export async function createIntent(userId: string, wallet: string, tokens: numbe
   }
 }
 
-// Step 2 — polled by the web app after it sends the tx. Finds the on-chain deposit
+// Step 2 - polled by the web app after it sends the tx. Finds the on-chain deposit
 // carrying our reference, verifies the vault actually received $GGRID, and credits
 // the user exactly once (dedup by signature). Idempotent: safe to call repeatedly.
 export async function checkIntent(userId: string, reference: string): Promise<DepositResult> {
@@ -98,7 +98,7 @@ export async function checkIntent(userId: string, reference: string): Promise<De
       )
     })()
   } catch {
-    // Lost the race to another poll that already credited it — just report state.
+    // Lost the race to another poll that already credited it - just report state.
     return { status: 200, body: { status: 'CONFIRMED', credits, signature: found.signature, balance: userBalance(userId) } }
   }
 

@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
 # ============================================================================
-#  $GGRID — one-command mainnet launch.
+#  $GGRID - one-command mainnet launch.
 #
 #  Runs the whole on-chain half of the launch in one go:
 #    preflight → deploy the ggrid_payout program → initialize the 75/12.5/7.5/5
 #    splitter → print the exact gateway env block to paste into the deploy platform.
 #
-#  What it does NOT do (these are YOUR actions — money / live token):
+#  What it does NOT do (these are YOUR actions - money / live token):
 #    - create the $GGRID coin on pump.fun (you do that; give me the CA/mint)
 #    - fund the deploy wallet with real SOL (~3-4 SOL)
 #
@@ -45,7 +45,7 @@ say "deploy wallet : $PAYER"
 say "balance       : ${BAL} SOL"
 say "mint (CA)     : $GGRID_MINT"
 say "token program : $TOKEN_PROGRAM"
-awk "BEGIN{ exit !($BAL < 3) }" && die "balance looks low (<3 SOL) — fund the wallet first (~3-4 SOL)."
+awk "BEGIN{ exit !($BAL < 3) }" && die "balance looks low (<3 SOL) - fund the wallet first (~3-4 SOL)."
 
 read -rp $'\nProceed with MAINNET deploy using REAL SOL? [y/N] ' ok
 [ "$ok" = "y" ] || die "aborted."
@@ -91,7 +91,7 @@ Set these in the gateway (.env for the non-secret ones, the deploy platform Secr
   GGRID_PROGRAM_ID    = $PROGRAM_ID
   GGRID_MINT          = $GGRID_MINT
   GGRID_TOKEN_PROGRAM = $TOKEN_PROGRAM
-  GGRID_RAW_PER_CREDIT= <set from the token price — 1 credit = \$0.000001>
+  GGRID_RAW_PER_CREDIT= <set from the token price - 1 credit = \$0.000001>
   GGRID_AUTHORITY_KEY = <contents of $KEYPAIR>   ← the deploy platform Secret, NEVER in the repo
 
 Then redeploy the gateway (push to main). Payouts flip ON automatically once all

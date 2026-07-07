@@ -1,9 +1,9 @@
 <#
-  GpuGrid — one-step provider installer (Windows).
+  GpuGrid - one-step provider installer (Windows).
   Turns an idle GPU into income: installs Ollama + cloudflared, exposes the GPU
   through a secure tunnel (no account needed) and joins the GpuGrid network.
 
-  Run:  double-click connect.bat   — or —   right-click install.ps1 → Run with PowerShell
+  Run:  double-click connect.bat   - or -   right-click install.ps1 → Run with PowerShell
 #>
 param(
   [string]$Gateway = $env:GGRID_GATEWAY,

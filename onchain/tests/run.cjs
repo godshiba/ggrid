@@ -129,7 +129,7 @@ async function main() {
     const d = existing.data
     const oldMint = new PublicKey(d.subarray(40, 72))
     const oldVault = new PublicKey(d.subarray(72, 104))
-    console.log('  (config exists from a prior run — resetting via shutdown)')
+    console.log('  (config exists from a prior run - resetting via shutdown)')
     const recip = (await withRetry('recip-ata', () => getOrCreateAssociatedTokenAccount(conn, authority, oldMint, authority.publicKey, false, 'confirmed', undefined, TP))).address
     await send(program.methods.shutdown().accountsPartial({
       config, authority: authority.publicKey, mint: oldMint, vault: oldVault, recipientToken: recip, tokenProgram: TP,

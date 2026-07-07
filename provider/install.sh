@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# GpuGrid — one-step provider installer (Linux / macOS).
+# GpuGrid - one-step provider installer (Linux / macOS).
 # Installs Ollama + cloudflared (tunnel, no account), exposes the GPU and joins the grid.
 #
 #   PROVIDER_TOKEN=ggrid_pv_... bash install.sh

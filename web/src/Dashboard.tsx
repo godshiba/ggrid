@@ -972,7 +972,7 @@ function Developer() {
                 </div>
               </div>
               <Ring pct={ov.total ? ov.successPct : 0} from={ACCENT} to={VIOLET} gid="usage" size={152}>
-                <div style={{ fontFamily: 'var(--display)', fontWeight: 300, fontSize: 27, color: INK }}>{ov.total ? Math.round(ov.successPct * 100) + '%' : '—'}</div>
+                <div style={{ fontFamily: 'var(--display)', fontWeight: 300, fontSize: 27, color: INK }}>{ov.total ? Math.round(ov.successPct * 100) + '%' : '-'}</div>
                 <div style={CARD_SUB}>ok</div>
               </Ring>
             </div>

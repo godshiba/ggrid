@@ -47,7 +47,7 @@ async function handleProxy(c: any, endpoint: Endpoint): Promise<Response> {
 
   // GPU marketplace: a developer can pin a specific node via the `x-ggrid-node`
   // header (or a `node` field in the body). When pinned we honor the choice
-  // exactly — one attempt on that node, no auto-fallback to another GPU.
+  // exactly - one attempt on that node, no auto-fallback to another GPU.
   const pin = (c.req.header('x-ggrid-node') || (typeof body.node === 'string' ? body.node : '') || '').trim()
   if (typeof body.node !== 'undefined') delete body.node // never forward to Ollama
   if (pin) {
@@ -59,7 +59,7 @@ async function handleProxy(c: any, endpoint: Endpoint): Promise<Response> {
   }
 
   // Try the best node. The RunPod fallback costs us real money, so it's gated
-  // to paid/allowed users — free signups can only use community GPUs.
+  // to paid/allowed users - free signups can only use community GPUs.
   const tried = new Set<string>()
   let node = selectNode(model)
   if (!node && (user.runpod_allowed || config.freeTierRunpod)) node = await ensureNode(model)

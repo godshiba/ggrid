@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
 # ============================================================================
-#  $GGRID — one-command FULL RECLAIM.
+#  $GGRID - one-command FULL RECLAIM.
 #
 #  Returns every reclaimable lamport from the on-chain deployment back to your
 #  wallet, in one run:
-#    1. shutdown()          — sweep the vault, close vault + config PDA (rent -> you)
+#    1. shutdown()          - sweep the vault, close vault + config PDA (rent -> you)
 #    2. close treasury/stakers token accounts (rent -> you)
-#    3. solana program close — reclaim the BIG program-rent chunk (~2.5 SOL)
+#    3. solana program close - reclaim the BIG program-rent chunk (~2.5 SOL)
 #    4. close leftover deploy buffers
 #    5. print how much SOL came back
 #
@@ -55,7 +55,7 @@ if [ "${SKIP_SHUTDOWN:-0}" != "1" ]; then
   ( cd scripts && npm i --silent >/dev/null 2>&1 || true
     AUTHORITY_KEYPAIR="$KEYPAIR" PROGRAM_ID="$PROGRAM_ID" GGRID_MINT="$GGRID_MINT" \
     RECIPIENT_WALLET="$RECIPIENT" RPC_URL="$RPC_URL" TOKEN_PROGRAM="$TOKEN_PROGRAM" \
-    npm run --silent recover ) || say "shutdown step reported an issue (already torn down?) — continuing"
+    npm run --silent recover ) || say "shutdown step reported an issue (already torn down?) - continuing"
 fi
 
 # ---- 3. close the program itself -> reclaims the big rent chunk

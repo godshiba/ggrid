@@ -12,7 +12,7 @@ interface SettleInput {
   latencyMs: number
 }
 
-// Mark job DONE, charge the user, pay the provider, and record the fee split —
+// Mark job DONE, charge the user, pay the provider, and record the fee split -
 // all in one transaction. Idempotency is by job id (a job settles once).
 export function settleJob(i: SettleInput): void {
   const split = feeSplit(i.cost)

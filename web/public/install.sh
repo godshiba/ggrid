@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# GpuGrid — one-step provider installer (Linux / macOS, incl. Apple Silicon M1–M5).
+# GpuGrid - one-step provider installer (Linux / macOS, incl. Apple Silicon M1-M5).
 # Installs Ollama + cloudflared (tunnel, no account), exposes the GPU and joins the grid.
 #
 #   PROVIDER_TOKEN=ggrid_pv_... bash install.sh
@@ -10,7 +10,7 @@ GATEWAY="${GGRID_GATEWAY:-https://gpugrid.app}"; GATEWAY="${GATEWAY%/}"
 MODEL="${MODEL:-llama3:8b}"
 PROVIDER_TOKEN="${PROVIDER_TOKEN:-}"
 OS="$(uname -s)"      # Linux | Darwin
-ARCH="$(uname -m)"    # x86_64 | aarch64 (Linux ARM) | arm64 (Apple Silicon M1–M5)
+ARCH="$(uname -m)"    # x86_64 | aarch64 (Linux ARM) | arm64 (Apple Silicon M1-M5)
 mkdir -p "$HOME/.gpugrid"
 
 info() { printf "\033[32m[GpuGrid]\033[0m %s\n" "$1"; }
@@ -39,7 +39,7 @@ gpu_info() {
 if ! command -v ollama >/dev/null 2>&1; then
   info "Installing Ollama..."
   if [ "$OS" = "Darwin" ]; then
-    # macOS (Apple Silicon M1–M5 or Intel): the ollama.com/install.sh is Linux-only.
+    # macOS (Apple Silicon M1-M5 or Intel): the ollama.com/install.sh is Linux-only.
     if command -v brew >/dev/null 2>&1; then
       brew install ollama
     else
@@ -70,7 +70,7 @@ if ! command -v cloudflared >/dev/null 2>&1; then
     case "$OS-$ARCH" in
       Linux-x86_64)   curl -fsSL "$base/cloudflared-linux-amd64"  -o "$HOME/.gpugrid/cloudflared";;
       Linux-aarch64)  curl -fsSL "$base/cloudflared-linux-arm64"  -o "$HOME/.gpugrid/cloudflared";;
-      Darwin-arm64)   curl -fsSL "$base/cloudflared-darwin-arm64.tgz" -o /tmp/cf.tgz; tar -xzf /tmp/cf.tgz -C "$HOME/.gpugrid";;  # M1–M5
+      Darwin-arm64)   curl -fsSL "$base/cloudflared-darwin-arm64.tgz" -o /tmp/cf.tgz; tar -xzf /tmp/cf.tgz -C "$HOME/.gpugrid";;  # M1-M5
       Darwin-x86_64)  curl -fsSL "$base/cloudflared-darwin-amd64.tgz" -o /tmp/cf.tgz; tar -xzf /tmp/cf.tgz -C "$HOME/.gpugrid";;  # Intel Mac
       *) echo "Install cloudflared manually: https://github.com/cloudflare/cloudflared/releases"; exit 1;;
     esac

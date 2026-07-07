@@ -1,5 +1,5 @@
 /**
- * Step 1 of teardown — reclaim rent locked in the PROGRAM's accounts.
+ * Step 1 of teardown - reclaim rent locked in the PROGRAM's accounts.
  *
  * Calls `shutdown`, which:
  *   - moves any leftover $GGRID from the vault back to your recipient token account,
@@ -9,7 +9,7 @@
  * tokens to the recipient), reclaiming their rent too.
  *
  * The BIG chunk (the ~1.5-2 SOL program rent) is reclaimed separately by recover.sh
- * via `solana program close` — a PDA instruction can't close the program itself.
+ * via `solana program close` - a PDA instruction can't close the program itself.
  *
  * Run:
  *   AUTHORITY_KEYPAIR=~/.config/solana/id.json \

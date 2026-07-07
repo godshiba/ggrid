@@ -17,7 +17,7 @@ const SRC = '/work/deployer.secret'
 const OUT = '/work/deployer.json'
 
 if (!fs.existsSync(SRC)) {
-  console.error(`missing ${SRC} — put your wallet secret there first`)
+  console.error(`missing ${SRC} - put your wallet secret there first`)
   process.exit(2)
 }
 const raw = fs.readFileSync(SRC, 'utf8').trim()
@@ -40,4 +40,4 @@ if (got !== EXPECTED) {
   process.exit(1)
 }
 fs.writeFileSync(OUT, JSON.stringify(Array.from(secret)))
-console.log(`OK — deployer.json written for ${got}`)
+console.log(`OK - deployer.json written for ${got}`)

@@ -2,7 +2,7 @@
  * Initialize the deployed ggrid_payout program (run once, after `anchor deploy`).
  *
  * Creates the treasury + stakers token accounts (by default ATAs owned by the
- * authority — pass TREASURY_OWNER / STAKERS_OWNER to use other wallets / a multisig),
+ * authority - pass TREASURY_OWNER / STAKERS_OWNER to use other wallets / a multisig),
  * derives the vault ATA of the config PDA, and calls
  * initialize(provider_bps, burn_bps, stakers_bps, treasury_bps) = 7500/1250/750/500.
  *

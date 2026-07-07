@@ -10,7 +10,7 @@
  * What this does NOT do:
  *   - It does not launch on pump.fun. pump.fun mints a *standard* SPL token and keeps
  *     the mint authority, so Token-2022 extensions are impossible there. If you want a
- *     pump.fun fair launch, do that on pump.fun directly — you don't need this script,
+ *     pump.fun fair launch, do that on pump.fun directly - you don't need this script,
  *     and the payout program works with the resulting SPL token unchanged.
  *
  * Run:
@@ -73,7 +73,7 @@ async function main() {
     name: NAME,
     symbol: SYMBOL,
     uri: URI,
-    additionalMetadata: [['project', 'GpuGrid — decentralized GPU compute']],
+    additionalMetadata: [['project', 'GpuGrid - decentralized GPU compute']],
   }
 
   const extensions = [ExtensionType.MetadataPointer]

@@ -74,7 +74,7 @@ api.post('/auth/privy', async (c) => {
   const existing = getUserByPrivyId(claims.privyId)
   if (existing) return c.json({ userId: existing.id, balance: existing.balance, isNew: false })
 
-  // new account — same per-IP anti-abuse cap as /signup
+  // new account - same per-IP anti-abuse cap as /signup
   if (!allowSignup(clientIp(c)))
     return c.json({ error: { message: 'signup limit reached for your network, try later', type: 'rate_limit' } }, 429)
   const user = createUserWithPrivy(claims.privyId, null, config.signupBonus)
@@ -231,7 +231,7 @@ api.post('/credits/dev-topup', requireUser, async (c) => {
 // The REAL token balance sitting in a Solana wallet, read live from chain. This is
 // distinct from the user's off-chain spendable credit balance (/api/me): it's what
 // they actually hold on-chain and can deposit. `available:false` when the gateway
-// has no RPC/mint configured (e.g. token not live) — the UI degrades gracefully.
+// has no RPC/mint configured (e.g. token not live) - the UI degrades gracefully.
 api.get('/wallet/balance', async (c) => {
   const wallet = String(c.req.query('wallet') ?? '').trim()
   if (!/^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(wallet))
@@ -321,7 +321,7 @@ api.delete('/admin/nodes/:id', requireAdmin, (c) => {
   return c.json({ ok: true })
 })
 
-// Un-quarantine a node (reset reliability) — manual "un-slash".
+// Un-quarantine a node (reset reliability) - manual "un-slash".
 api.post('/admin/nodes/:id/reset', requireAdmin, (c) => {
   const res = db.query('UPDATE nodes SET reliability=1.0 WHERE id=?').run(c.req.param('id'))
   if (res.changes === 0) return c.json({ error: 'node not found' }, 404)

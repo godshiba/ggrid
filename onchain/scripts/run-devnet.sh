@@ -6,7 +6,7 @@ cd /work
 KP=/work/deployer.json
 URL="${RPC_URL:-https://api.devnet.solana.com}"
 
-[ -f "$KP" ] || { echo "missing deployer.json — run: node scripts/import-key.cjs"; exit 2; }
+[ -f "$KP" ] || { echo "missing deployer.json - run: node scripts/import-key.cjs"; exit 2; }
 
 echo "== wallet =="
 echo "address: $(solana address -k "$KP")"

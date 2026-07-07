@@ -436,7 +436,7 @@ input[type='range'].rig::-moz-range-thumb {
   opacity: 0.05;
   background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.8' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
 }
-/* grain is static now — the old stepped drift snapped every 2s and read as
+/* grain is static now - the old stepped drift snapped every 2s and read as
    flickering. A still 4%-opacity grain still adds texture without the twitch. */
 
 /* reusable accent treatments so blocks aren't all identical */
@@ -453,7 +453,7 @@ input[type='range'].rig::-moz-range-thumb {
   height: 2px;
   background: var(--accent);
 }
-/* frosted glass panels — no fill color, real depth from blur + edge light,
+/* frosted glass panels - no fill color, real depth from blur + edge light,
    lift + accent glow on hover. Overrides inline PANEL bg/border via !important. */
 .glass-panel {
   position: relative;
@@ -468,7 +468,7 @@ input[type='range'].rig::-moz-range-thumb {
     border-color 0.4s ease;
   will-change: transform;
 }
-/* a single hairline of light skimming the top edge — the "glass" tell */
+/* a single hairline of light skimming the top edge - the "glass" tell */
 .glass-panel::after {
   content: '';
   position: absolute;
@@ -499,7 +499,7 @@ input[type='range'].rig::-moz-range-thumb {
   }
 }
 
-/* dashboard Overview — glass-bento grid (6-col; collapses to 2 then 1) */
+/* dashboard Overview - glass-bento grid (6-col; collapses to 2 then 1) */
 .bento {
   display: grid;
   grid-template-columns: repeat(6, minmax(0, 1fr));
@@ -528,7 +528,7 @@ input[type='range'].rig::-moz-range-thumb {
   color: #eaf4ff !important;
 }
 
-/* dashboard Overview — asymmetric bento (hero balance + stacked stats) */
+/* dashboard Overview - asymmetric bento (hero balance + stacked stats) */
 .ov-bento {
   display: grid;
   grid-template-columns: 1.7fr 1fr;
