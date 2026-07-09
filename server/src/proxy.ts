@@ -109,19 +109,51 @@ export async function tryProxy(a: Attempt): Promise<Response | null> {
     return null // retryable
   }
 
-  // Non-streaming (incl. embeddings): read JSON, bill, return.
+  // Non-streaming (incl. embeddings): read JSON, bill, return. A mid-read failure
+  // (the node dropped before we got the full body) is retryable -> return null so
+  // the caller fails over to another node instead of erroring.
   if (endpoint === 'embeddings' || !body.stream) {
-    const data = await upstream.json()
+    let data: any
+    try {
+      data = await upstream.json()
+    } catch (e) {
+      fail('upstream read failed: ' + String(e))
+      return null // retryable
+    }
     finish({ in: data?.usage?.prompt_tokens ?? 0, out: data?.usage?.completion_tokens ?? 0 })
     return json(data, 200)
   }
 
-  // Streaming: pass bytes straight through, capture usage, bill on completion.
+  // Streaming: read the FIRST chunk before committing to this node. If the node
+  // dies at/before the first token, we return null and the caller fails over to
+  // another node - the client never sees a broken stream. Once the first token
+  // arrives we commit and stream the rest; a drop AFTER that can't fail over (the
+  // client is already receiving), so that request ends with the partial output.
   const reader = upstream.body.getReader()
   const decoder = new TextDecoder()
   let acc = ''
+  let firstValue: Uint8Array
+  try {
+    const first = await reader.read()
+    if (first.done || !first.value) {
+      fail('upstream closed with no output')
+      return null // retryable
+    }
+    firstValue = first.value
+    acc += decoder.decode(firstValue, { stream: true })
+  } catch (e) {
+    fail('stream error before first chunk: ' + String(e))
+    return null // retryable
+  }
+
+  let sentFirst = false
   const stream = new ReadableStream<Uint8Array>({
     async pull(controller) {
+      if (!sentFirst) {
+        sentFirst = true
+        controller.enqueue(firstValue)
+        return
+      }
       try {
         const { done, value } = await reader.read()
         if (done) {
@@ -132,7 +164,7 @@ export async function tryProxy(a: Attempt): Promise<Response | null> {
         acc += decoder.decode(value, { stream: true })
         controller.enqueue(value)
       } catch (e) {
-        fail('stream error: ' + String(e))
+        finish(extractUsage(acc)) // bill what was delivered
         controller.error(e)
       }
     },

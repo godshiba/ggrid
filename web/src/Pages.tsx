@@ -740,7 +740,7 @@ console.log(r.choices[0].message.content);`}</Code>
           <Code title="WINDOWS (PowerShell)">{`$env:PROVIDER_TOKEN="ggrid_pv_..."; irm ${origin}/install.ps1 | iex`}</Code>
           <Code title="MACOS - APPLE SILICON (M4 / M5)">{`curl -fsSL ${origin}/install.sh | PROVIDER_TOKEN=ggrid_pv_... bash`}</Code>
           <P style={{ color: DIM, fontSize: 13 }}>
-            Apple Silicon Macs join the grid like any node (M4 / M5 recommended for real throughput). A MacBook Air
+            Apple Silicon nodes are hardware-verified on connect (M4 / M5 only - older chips are declined). A MacBook Air
             works but throttles under long sustained jobs, so it's flagged for short bursts; a Mac with active cooling
             (Pro / mini / Studio) stays at full speed and earns more.
           </P>

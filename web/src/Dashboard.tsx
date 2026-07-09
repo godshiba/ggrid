@@ -1621,8 +1621,8 @@ function Provider() {
   const install = `# Windows (PowerShell) - installs Ollama + a secure tunnel, then joins the grid
 $env:PROVIDER_TOKEN="${nodeToken}"; irm ${origin}/install.ps1 | iex
 
-# macOS - Apple Silicon (M4 / M5 recommended). A MacBook Air runs but throttles
-# under sustained load (flagged "burst") - a cooled Mac (Pro / mini / Studio) earns more.
+# macOS - Apple Silicon (M4 / M5). Hardware-verified on connect; a MacBook Air runs
+# but throttles under sustained load (flagged "burst") - a cooled Mac earns more.
 curl -fsSL ${origin}/install.sh | PROVIDER_TOKEN=${nodeToken} bash`
 
   const nav = [

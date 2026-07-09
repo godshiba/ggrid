@@ -3,6 +3,7 @@ import { z } from 'zod'
 import { db, uid, now } from '../db'
 import { sha256, randToken } from '../auth'
 import { touch, dropNode, getNode } from '../registry'
+import { verifyNode } from '../verify'
 
 export const nodes = new Hono()
 
@@ -35,10 +36,10 @@ nodes.post('/register', async (c) => {
   const secret = randToken('ggrid_node_')
   const priceFactor = Math.min(3, Math.max(0.5, p.data.priceFactor ?? 1.0))
   const backend = p.data.backend ?? 'cuda'
-  // All nodes (incl. Apple Silicon "metal") join and serve immediately. Metadata
-  // (chip / memory / fanless) is still captured for labelling + thermal-aware
-  // routing. (A measured hardware-verification gate is planned for a later update.)
-  const state = 'verified'
+  // Metal (Apple Silicon) nodes must pass the measured benchmark first -> they
+  // register `provisional` and don't serve until verifyNode() promotes them.
+  // Everything else is trusted as before (`verified`).
+  const state = backend === 'metal' ? 'provisional' : 'verified'
   const caps = JSON.stringify(p.data.caps ?? ['chat', 'embeddings'])
   db.query(
     'INSERT INTO nodes (id,provider_id,url,secret_hash,source,models,gpu_info,reliability,price_factor,backend,chip,mem_gb,fanless,caps,state,created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
@@ -61,6 +62,9 @@ nodes.post('/register', async (c) => {
     now(),
   )
   touch(id, 'ONLINE')
+  // Benchmark metal nodes in the background; the installer keeps heartbeating and
+  // the node flips to `verified` (or `rejected`) once the probe finishes.
+  if (backend === 'metal') void verifyNode(id).catch(() => {})
   return c.json({ nodeId: id, nodeSecret: secret, state })
 })
 

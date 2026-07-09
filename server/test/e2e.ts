@@ -6,6 +6,8 @@ import { server as mock } from './mock-node'
 process.env.DATABASE_URL = 'file::memory:'
 process.env.ADMIN_KEY = 'test-admin'
 process.env.LOG = 'off'
+process.env.VERIFY_SUSTAINED_ROUNDS = '2' // keep the metal benchmark quick in tests
+process.env.QUEUE_MAX_WAIT_MS = '500' // keep the capacity-queue timeout test quick
 const { buildApp } = await import('../src/app')
 const app = buildApp()
 
@@ -194,8 +196,11 @@ check('pin to unknown node → 409', pinUnknown.status === 409)
 const pinBody = await jpost('/v1/chat/completions', { model: 'gemma2:9b', node: regGpu.nodeId, messages: [{ role: 'user', content: 'hi' }] }, auth)
 check('pin via body.node field → 200', pinBody.status === 200)
 
-// --- Apple-Silicon ("metal") node type - joins and serves like any node ---
-const regMac = await (
+// --- Apple-Silicon ("metal") hardware verification gate ---
+const { verifyNode } = await import('../src/verify')
+
+// A metal node registers provisional and does NOT serve until it passes the bench.
+const regM5 = await (
   await jpost('/nodes/register', {
     url: mockUrl,
     models: ['metal-test:1'],
@@ -206,31 +211,56 @@ const regMac = await (
     fanless: false,
   })
 ).json()
-check('metal node registers verified', regMac.state === 'verified')
-const macNodes = await (await call('/api/nodes?all=1')).json()
-const macRow = macNodes.nodes.find((n: any) => n.id === regMac.nodeId)
-check('metal node appears in marketplace', !!macRow)
-check('metal node reports backend=metal', macRow?.backend === 'metal')
-check('metal node reports its chip', macRow?.chip === 'Apple M5 Max')
-check('metal node reports memory', macRow?.memGb === 48)
-const macServe = await jpost('/v1/chat/completions', { model: 'metal-test:1', messages: [{ role: 'user', content: 'hi' }] }, auth)
-check('metal node serves immediately → 200', macServe.status === 200)
+check('metal node registers provisional', regM5.state === 'provisional')
+const beforeVerify = await (await call('/api/nodes?all=1')).json()
+check('provisional metal node hidden from marketplace', !beforeVerify.nodes.some((n: any) => n.id === regM5.nodeId))
+check(
+  'provisional metal node does not serve → 503',
+  (await jpost('/v1/chat/completions', { model: 'metal-test:1', messages: [{ role: 'user', content: 'hi' }] }, auth)).status === 503,
+)
 
-// A fanless MacBook Air is flagged (from hardware, no benchmark) for burst labelling.
-const regAir = await (
-  await jpost('/nodes/register', {
-    url: mockUrl,
-    models: ['metal-air:1'],
-    providerToken: pv.providerToken,
-    backend: 'metal',
-    chip: 'Apple M4',
-    fanless: true,
-  })
+await verifyNode(regM5.nodeId) // fast mock clears the floor
+const m5Row = (await (await call('/api/nodes?all=1')).json()).nodes.find((n: any) => n.id === regM5.nodeId)
+check('verified metal node appears', !!m5Row)
+check('metal node reports chip', m5Row?.chip === 'Apple M5 Max')
+check('metal node reports memory', m5Row?.memGb === 48)
+check('metal node has a measured speed', m5Row?.perfTokensPerSec > 0)
+check(
+  'verified metal node serves → 200',
+  (await jpost('/v1/chat/completions', { model: 'metal-test:1', messages: [{ role: 'user', content: 'hi' }] }, auth)).status === 200,
+)
+
+// An M2 node is declined by policy (M4/M5 only).
+const regM2 = await (
+  await jpost('/nodes/register', { url: mockUrl, models: ['metal-old:1'], providerToken: pv.providerToken, backend: 'metal', chip: 'Apple M2' })
 ).json()
-const airNodes = await (await call('/api/nodes?all=1')).json()
-const airRow = airNodes.nodes.find((n: any) => n.id === regAir.nodeId)
-check('fanless metal node flagged fanless', airRow?.fanless === true)
-check('fanless metal node still serves', (await jpost('/v1/chat/completions', { model: 'metal-air:1', messages: [{ role: 'user', content: 'hi' }] }, auth)).status === 200)
+await verifyNode(regM2.nodeId)
+const m2Row = (await (await call('/api/admin/nodes', { headers: { 'x-admin-key': 'test-admin' } })).json()).nodes.find(
+  (n: any) => n.id === regM2.nodeId,
+)
+check('M2 node is rejected', m2Row?.state === 'rejected')
+check(
+  'rejected M2 node does not serve → 503',
+  (await jpost('/v1/chat/completions', { model: 'metal-old:1', messages: [{ role: 'user', content: 'hi' }] }, auth)).status === 503,
+)
+
+// --- Resilient routing: capacity queue (failover is covered by the dead-node retry test above) ---
+const { waitForSlot, notifySlotFree } = await import('../src/queue')
+const { modelHasOnlineNode } = await import('../src/registry')
+check('modelHasOnlineNode true for a served model', modelHasOnlineNode('metal-test:1') === true)
+check('modelHasOnlineNode false for an unknown model', modelHasOnlineNode('does-not-exist:1') === false)
+// A queued request wakes the moment a slot frees.
+let slotFree = false
+const waitP = waitForSlot(() => slotFree)
+setTimeout(() => {
+  slotFree = true
+  notifySlotFree()
+}, 60)
+check('queue wakes when a slot frees', (await waitP) === true)
+// It gives up (→ caller 503s) after QUEUE_MAX_WAIT_MS if no slot ever frees.
+const qt0 = Date.now()
+const timedOut = await waitForSlot(() => false)
+check('queue times out when no slot frees', timedOut === false && Date.now() - qt0 >= 400)
 
 // --- stats ---
 const stats = await (await call('/api/stats')).json()

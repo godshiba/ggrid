@@ -17,7 +17,8 @@ import {
   type Env,
 } from '../auth'
 import { verifyPrivyToken } from '../privy'
-import { onlineCount, onlineModels, dropNode, nodeStats, listNodes } from '../registry'
+import { onlineCount, onlineModels, dropNode, nodeStats, listNodes, getNode } from '../registry'
+import { verifyNode } from '../verify'
 import { allowSignup } from '../ratelimit'
 import { config } from '../config'
 import { solanaEnabled, solanaReadable, getWalletBalance } from '../solana'
@@ -326,4 +327,13 @@ api.post('/admin/nodes/:id/reset', requireAdmin, (c) => {
   const res = db.query('UPDATE nodes SET reliability=1.0 WHERE id=?').run(c.req.param('id'))
   if (res.changes === 0) return c.json({ error: 'node not found' }, 404)
   return c.json({ ok: true })
+})
+
+// Re-run the hardware benchmark / verification gate for a node (e.g. after a Mac
+// was rejected, or to re-measure thermals). Runs in the background.
+api.post('/admin/nodes/:id/verify', requireAdmin, (c) => {
+  const id = c.req.param('id')
+  if (!getNode(id)) return c.json({ error: 'node not found' }, 404)
+  void verifyNode(id).catch(() => {})
+  return c.json({ ok: true, message: 'verification started' })
 })

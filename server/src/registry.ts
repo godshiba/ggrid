@@ -1,5 +1,6 @@
 import { db } from './db'
 import { config } from './config'
+import { notifySlotFree } from './queue'
 import type { NodeRow } from './types'
 
 // In-memory liveness for a single instance. Static node data lives in SQLite;
@@ -29,6 +30,8 @@ export function setActive(nodeId: string, delta: number): void {
   const base: Live = live.get(nodeId) ?? { lastBeat: now, activeJobs: 0, status: 'ONLINE', since: now, onlineMs: 0 }
   base.activeJobs = Math.max(0, base.activeJobs + delta)
   live.set(nodeId, base)
+  // A finishing job frees a slot -> wake anything parked in the capacity queue.
+  if (delta < 0) notifySlotFree()
 }
 
 export function isOnline(nodeId: string): boolean {
@@ -65,10 +68,10 @@ export function nodeCaps(n: NodeRow): string[] {
 
 // Pick the best live node serving `model`: cheapest first (price_factor), then
 // fastest (perf), most reliable, least busy. Nodes below the reliability floor
-// are quarantined (auto-slashed) out of routing entirely. The `state` guard is a
-// forward-compat hook (all nodes are currently 'verified'). A `longJob` (streaming
-// or high max_tokens) prefers cooled nodes - a fanless MacBook Air throttles under
-// sustained load, so it takes long jobs only as a fallback.
+// are quarantined (auto-slashed) out of routing entirely. Only `verified` nodes
+// serve; a metal node still being benchmarked (provisional) or rejected is held
+// back. A `longJob` (streaming or high max_tokens) prefers cooled nodes - a fanless
+// MacBook Air throttles under sustained load, so it takes long jobs only as a fallback.
 export function selectNode(
   model: string,
   exclude?: Set<string>,
@@ -109,6 +112,21 @@ export function onlineModels(): string[] {
 export function onlineCount(): number {
   const rows = db.query('SELECT id FROM nodes').all() as { id: string }[]
   return rows.filter((r) => isOnline(r.id)).length
+}
+
+// Is there an online, verified node that COULD serve this model+endpoint, ignoring
+// current capacity? Distinguishes "all busy -> queue and wait" from "nothing
+// serves this model -> 503 (or cloud fallback)".
+export function modelHasOnlineNode(model: string, endpoint: 'chat' | 'embeddings' = 'chat'): boolean {
+  const rows = db.query('SELECT * FROM nodes').all() as NodeRow[]
+  return rows.some(
+    (n) =>
+      (n.state ?? 'verified') === 'verified' &&
+      isOnline(n.id) &&
+      n.reliability >= config.minReliability &&
+      nodeCaps(n).includes(endpoint) &&
+      (JSON.parse(n.models) as string[]).includes(model),
+  )
 }
 
 export function penalize(nodeId: string): void {
@@ -213,7 +231,8 @@ export function listNodes(opts: { includeOffline?: boolean } = {}) {
         quarantined: n.reliability < config.minReliability,
       }
     })
-    // state guard (forward-compat; all nodes are currently 'verified').
+    // Only verified nodes are offered; a metal node being benchmarked (provisional)
+    // or rejected never shows up as pickable.
     .filter((n) => (n.state ?? 'verified') === 'verified')
     .filter((n) => opts.includeOffline || n.online)
     .sort((a, b) => {

@@ -95,12 +95,48 @@ export const config = {
     minDepositCredits: num(process.env.GGRID_MIN_DEPOSIT_CREDITS, 0),
   },
 
-  // --- Thermal-aware routing (Apple-Silicon "metal" tier) ---
-  routing: {
+  // --- Node verification / Apple-Silicon ("metal") tier ---
+  // Metal nodes must pass a MEASURED benchmark before serving paid traffic;
+  // cuda/runpod nodes are auto-verified (unchanged behaviour). We never trust a
+  // node's self-declared hardware - the benchmark floor is the real gate.
+  verify: {
+    // Minimum sustained tokens/sec to be accepted. M4/M5 clear this; older Macs
+    // and weak boxes don't -> rejected regardless of the chip string they claim.
+    minTokensPerSec: Number(process.env.VERIFY_MIN_TPS ?? 12),
+    // Policy: only these Apple-Silicon chips are allowed (declared chip must
+    // contain one of these substrings). "M4,M5" -> M1/M2/M3 are declined.
+    allowedMacChips: (process.env.VERIFY_MAC_CHIPS ?? 'M4,M5')
+      .split(',')
+      .map((s) => s.trim())
+      .filter(Boolean),
+    // Handshake bench length (quick gate) and sustained-probe length + rounds
+    // (runs back-to-back to surface thermal throttling on fanless Airs).
+    handshakeTokens: num(process.env.VERIFY_HANDSHAKE_TOKENS, 48),
+    sustainedTokens: num(process.env.VERIFY_SUSTAINED_TOKENS, 256),
+    sustainedRounds: num(process.env.VERIFY_SUSTAINED_ROUNDS, 6),
+    // If the last sustained sample drops below (1 - thermalDropPct) x the first,
+    // flag the node thermal_limited (auto-catches MacBook Air throttling).
+    thermalDropPct: Number(process.env.VERIFY_THERMAL_DROP_PCT ?? 0.2),
     // A chat request that streams or asks for more than this many output tokens
-    // is a "long job" → routed away from fanless (MacBook Air) nodes when a
-    // cooled node is available, since Airs throttle under sustained load.
+    // is a "long job" -> routed away from fanless / thermal_limited nodes when a
+    // cooled node is available.
     longJobTokens: num(process.env.LONG_JOB_TOKENS, 256),
+    // Per-benchmark upstream timeout (cold generations on a fresh node are slow).
+    benchTimeoutMs: num(process.env.VERIFY_BENCH_TIMEOUT_MS, 120_000),
+  },
+
+  // --- Resilient routing: failover + capacity queue ---
+  routing: {
+    // Failover: how many different nodes a single request may be tried on before
+    // giving up. A node that dies at/before its first token fails over to the
+    // next, so one node dropping does not fail the request.
+    maxAttempts: num(process.env.ROUTING_MAX_ATTEMPTS, 3),
+    // Queue: when every node serving the model is at capacity, wait up to this
+    // long for a slot to free instead of returning 503 immediately.
+    queueMaxWaitMs: num(process.env.QUEUE_MAX_WAIT_MS, 20_000),
+    // Cap on how many requests may be waiting in the capacity queue at once
+    // (backpressure - beyond this we 503 rather than queue unboundedly).
+    queueMaxDepth: num(process.env.QUEUE_MAX_DEPTH, 100),
   },
 }
 

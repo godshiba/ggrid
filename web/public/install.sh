@@ -102,7 +102,7 @@ info "Your node URL: $PUBLIC_URL"
 
 # --- 4. register ---
 # On Apple Silicon we register as a "metal" node and send chip / memory / fanless
-# so the gateway can label the node and route long jobs away from a fanless Air.
+# so the gateway runs its measured verification (M4/M5 only) and labels the node.
 # Linux/NVIDIA nodes register as before (backend defaults to cuda).
 GPU="$(gpu_info)"
 EXTRA=""
@@ -115,7 +115,7 @@ if [ "$OS" = "Darwin" ]; then
   case "$MODEL_NAME" in *"MacBook Air"*) FANLESS=true;; *) FANLESS=false;; esac
   EXTRA=",\"backend\":\"metal\",\"chip\":\"$GPU\",\"fanless\":$FANLESS"
   [ -n "$MEM_GB" ] && EXTRA="$EXTRA,\"memGb\":$MEM_GB"
-  info "Apple Silicon: ${GPU:-unknown}${MEM_GB:+, ${MEM_GB}GB}, fanless=$FANLESS → joining the grid..."
+  info "Apple Silicon: ${GPU:-unknown}${MEM_GB:+, ${MEM_GB}GB}, fanless=$FANLESS → running hardware verification..."
 fi
 REG="$(curl -fsS -X POST "$GATEWAY/nodes/register" -H "content-type: application/json" \
   -d "{\"url\":\"$PUBLIC_URL\",\"models\":$(models_json),\"gpuInfo\":\"$GPU\",\"providerToken\":\"$PROVIDER_TOKEN\"$EXTRA}")"

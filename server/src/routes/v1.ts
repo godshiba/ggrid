@@ -1,7 +1,8 @@
 import { Hono } from 'hono'
 import { z } from 'zod'
 import { userByApiKey, bearer } from '../auth'
-import { selectNode, nodeForRequest, onlineModels } from '../registry'
+import { selectNode, nodeForRequest, onlineModels, modelHasOnlineNode } from '../registry'
+import { waitForSlot } from '../queue'
 import { ensureNode } from '../runpod'
 import { tryProxy, type Endpoint } from '../proxy'
 import { knownModels } from '../pricing'
@@ -63,16 +64,27 @@ async function handleProxy(c: any, endpoint: Endpoint): Promise<Response> {
   // free, since those throttle under sustained load.
   const longJob =
     endpoint === 'chat' &&
-    (!!body.stream || (typeof body.max_tokens === 'number' && body.max_tokens > config.routing.longJobTokens))
+    (!!body.stream || (typeof body.max_tokens === 'number' && body.max_tokens > config.verify.longJobTokens))
   const pick = (tried?: Set<string>) => selectNode(model, tried, { endpoint, longJob })
 
-  // Try the best node. The RunPod fallback costs us real money, so it's gated
-  // to paid/allowed users - free signups can only use community GPUs.
   const tried = new Set<string>()
   let node = pick()
+
+  // Capacity queue: a node serves this model but every one is busy -> wait for a
+  // slot to free (up to queueMaxWaitMs) instead of returning 503 immediately.
+  if (!node && modelHasOnlineNode(model, endpoint)) {
+    if (await waitForSlot(() => !!pick())) node = pick()
+  }
+
+  // RunPod fallback costs real money, so it's gated to paid/allowed users - free
+  // signups can only use community GPUs. Tried after the queue (community first).
   if (!node && (user.runpod_allowed || config.freeTierRunpod)) node = await ensureNode(model)
+
+  // Failover: try up to maxAttempts different nodes. tryProxy returns null when a
+  // node fails at/before its first token, so one node dropping doesn't fail the
+  // request - it retries on the next.
   let attempted = false
-  for (let i = 0; i < 2 && node; i++) {
+  for (let i = 0; i < config.routing.maxAttempts && node; i++) {
     attempted = true
     const res = await tryProxy({ userId: user.id, node, model, body, endpoint })
     if (res) return res
