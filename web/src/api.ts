@@ -89,6 +89,13 @@ export interface GpuNode {
   id: string
   gpu: string
   source: 'LOCAL' | 'RUNPOD'
+  backend: 'cuda' | 'metal' | string
+  chip: string | null
+  memGb: number | null
+  fanless: boolean
+  thermalLimited: boolean
+  tier: string
+  state: string
   models: string[]
   priceFactor: number
   reliability: number

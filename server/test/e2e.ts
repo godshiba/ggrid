@@ -194,6 +194,44 @@ check('pin to unknown node → 409', pinUnknown.status === 409)
 const pinBody = await jpost('/v1/chat/completions', { model: 'gemma2:9b', node: regGpu.nodeId, messages: [{ role: 'user', content: 'hi' }] }, auth)
 check('pin via body.node field → 200', pinBody.status === 200)
 
+// --- Apple-Silicon ("metal") node type - joins and serves like any node ---
+const regMac = await (
+  await jpost('/nodes/register', {
+    url: mockUrl,
+    models: ['metal-test:1'],
+    providerToken: pv.providerToken,
+    backend: 'metal',
+    chip: 'Apple M5 Max',
+    memGb: 48,
+    fanless: false,
+  })
+).json()
+check('metal node registers verified', regMac.state === 'verified')
+const macNodes = await (await call('/api/nodes?all=1')).json()
+const macRow = macNodes.nodes.find((n: any) => n.id === regMac.nodeId)
+check('metal node appears in marketplace', !!macRow)
+check('metal node reports backend=metal', macRow?.backend === 'metal')
+check('metal node reports its chip', macRow?.chip === 'Apple M5 Max')
+check('metal node reports memory', macRow?.memGb === 48)
+const macServe = await jpost('/v1/chat/completions', { model: 'metal-test:1', messages: [{ role: 'user', content: 'hi' }] }, auth)
+check('metal node serves immediately → 200', macServe.status === 200)
+
+// A fanless MacBook Air is flagged (from hardware, no benchmark) for burst labelling.
+const regAir = await (
+  await jpost('/nodes/register', {
+    url: mockUrl,
+    models: ['metal-air:1'],
+    providerToken: pv.providerToken,
+    backend: 'metal',
+    chip: 'Apple M4',
+    fanless: true,
+  })
+).json()
+const airNodes = await (await call('/api/nodes?all=1')).json()
+const airRow = airNodes.nodes.find((n: any) => n.id === regAir.nodeId)
+check('fanless metal node flagged fanless', airRow?.fanless === true)
+check('fanless metal node still serves', (await jpost('/v1/chat/completions', { model: 'metal-air:1', messages: [{ role: 'user', content: 'hi' }] }, auth)).status === 200)
+
 // --- stats ---
 const stats = await (await call('/api/stats')).json()
 check('stats.totalJobs >= 3', stats.totalJobs >= 3)

@@ -60,6 +60,14 @@ if ! curl -fsS http://localhost:11434/api/tags >/dev/null 2>&1; then
 fi
 info "Downloading model '$MODEL' (first run can be a few GB)..."; ollama pull "$MODEL"
 
+# --- macOS: keep the machine awake so the node doesn't drop when idle ---
+# caffeinate stops sleep, NOT overheating - a fanless MacBook Air still throttles
+# under sustained load; that is detected server-side and labelled BURST.
+if [ "$OS" = "Darwin" ] && command -v caffeinate >/dev/null 2>&1; then
+  caffeinate -dimsu -w $$ >/dev/null 2>&1 &
+  info "caffeinate on - this Mac won't sleep while the node runs."
+fi
+
 # --- 2. cloudflared ---
 if ! command -v cloudflared >/dev/null 2>&1; then
   info "Installing cloudflared..."
@@ -93,9 +101,24 @@ done
 info "Your node URL: $PUBLIC_URL"
 
 # --- 4. register ---
+# On Apple Silicon we register as a "metal" node and send chip / memory / fanless
+# so the gateway can label the node and route long jobs away from a fanless Air.
+# Linux/NVIDIA nodes register as before (backend defaults to cuda).
 GPU="$(gpu_info)"
+EXTRA=""
+if [ "$OS" = "Darwin" ]; then
+  HW="$(system_profiler SPHardwareDataType 2>/dev/null || true)"
+  CHIP="$(printf '%s' "$HW" | awk -F': ' '/Chip/{print $2; exit}' | tr -d '"')"
+  [ -n "$CHIP" ] && GPU="$CHIP"
+  MODEL_NAME="$(printf '%s' "$HW" | awk -F': ' '/Model Name/{print $2; exit}')"
+  MEM_GB="$(printf '%s' "$HW" | awk -F': ' '/Memory/{print $2; exit}' | grep -oE '[0-9]+' | head -n1 || true)"
+  case "$MODEL_NAME" in *"MacBook Air"*) FANLESS=true;; *) FANLESS=false;; esac
+  EXTRA=",\"backend\":\"metal\",\"chip\":\"$GPU\",\"fanless\":$FANLESS"
+  [ -n "$MEM_GB" ] && EXTRA="$EXTRA,\"memGb\":$MEM_GB"
+  info "Apple Silicon: ${GPU:-unknown}${MEM_GB:+, ${MEM_GB}GB}, fanless=$FANLESS → joining the grid..."
+fi
 REG="$(curl -fsS -X POST "$GATEWAY/nodes/register" -H "content-type: application/json" \
-  -d "{\"url\":\"$PUBLIC_URL\",\"models\":$(models_json),\"gpuInfo\":\"$GPU\",\"providerToken\":\"$PROVIDER_TOKEN\"}")"
+  -d "{\"url\":\"$PUBLIC_URL\",\"models\":$(models_json),\"gpuInfo\":\"$GPU\",\"providerToken\":\"$PROVIDER_TOKEN\"$EXTRA}")"
 NODE_ID="$(echo "$REG"   | grep -oE '"nodeId":"[^"]+"'     | sed 's/"nodeId":"//; s/"$//')"
 NODE_SECRET="$(echo "$REG" | grep -oE '"nodeSecret":"[^"]+"' | sed 's/"nodeSecret":"//; s/"$//')"
 [ -n "$NODE_ID" ] || { echo "Registration failed: $REG"; kill "$CF_PID" 2>/dev/null || true; exit 1; }

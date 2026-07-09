@@ -94,6 +94,14 @@ export const config = {
     // Don't credit a top-up worth fewer than this many credits (dust guard).
     minDepositCredits: num(process.env.GGRID_MIN_DEPOSIT_CREDITS, 0),
   },
+
+  // --- Thermal-aware routing (Apple-Silicon "metal" tier) ---
+  routing: {
+    // A chat request that streams or asks for more than this many output tokens
+    // is a "long job" → routed away from fanless (MacBook Air) nodes when a
+    // cooled node is available, since Airs throttle under sustained load.
+    longJobTokens: num(process.env.LONG_JOB_TOKENS, 256),
+  },
 }
 
 // On-chain payouts are live only when the core Solana settings are all present.

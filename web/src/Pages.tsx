@@ -723,7 +723,7 @@ console.log(r.choices[0].message.content);`}</Code>
           </P>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(220px,1fr))', gap: 10, margin: '4px 0 16px' }}>
             {[
-              ['Requirements', 'NVIDIA 8 GB+ VRAM or Apple Silicon (M1-M5); Windows, Linux, or macOS.'],
+              ['Requirements', 'NVIDIA GPU with 8 GB+ VRAM (Windows), or an Apple Silicon Mac - M4 / M5 (macOS).'],
               ['Installed for you', 'Ollama + a secure Cloudflare tunnel - no account, no port-forwarding.'],
               ['Payout', 'Add a Solana wallet; withdraw $GGRID on-chain anytime.'],
             ].map(([k, v]) => (
@@ -737,8 +737,13 @@ console.log(r.choices[0].message.content);`}</Code>
           <Code title="CURL">{`curl ${origin}/api/providers -d '{}'
 # → { "providerId": "...", "providerToken": "ggrid_pv_..." }`}</Code>
           <P><b style={{ color: INK }}>2. Run the installer</b> on the GPU machine. It installs Ollama, pulls a model, opens a tunnel, and registers the node:</P>
-          <Code title="LINUX / MACOS (incl. Apple Silicon M1-M5)">{`curl -fsSL ${origin}/install.sh | PROVIDER_TOKEN=ggrid_pv_... bash`}</Code>
           <Code title="WINDOWS (PowerShell)">{`$env:PROVIDER_TOKEN="ggrid_pv_..."; irm ${origin}/install.ps1 | iex`}</Code>
+          <Code title="MACOS - APPLE SILICON (M4 / M5)">{`curl -fsSL ${origin}/install.sh | PROVIDER_TOKEN=ggrid_pv_... bash`}</Code>
+          <P style={{ color: DIM, fontSize: 13 }}>
+            Apple Silicon Macs join the grid like any node (M4 / M5 recommended for real throughput). A MacBook Air
+            works but throttles under long sustained jobs, so it's flagged for short bursts; a Mac with active cooling
+            (Pro / mini / Studio) stays at full speed and earns more.
+          </P>
           <P><b style={{ color: INK }}>3. Stay online</b> - keep the window open. Your node shows as <MonoInline>online</MonoInline> in the console and the grid routes jobs to it automatically. The more reliable your uptime, the more traffic you get.</P>
           <P><b style={{ color: INK }}>4. Add a wallet & withdraw</b> - set your Solana payout address in the console, then withdraw your accrued balance as $GGRID whenever you want. The split (75% you / 12.5% burn / 7.5% stakers / 5% treasury) is enforced on-chain.</P>
           <P style={{ color: DIM, fontSize: 13.5 }}>Earnings scale with network demand - a node that’s online and reliable earns more as traffic grows. Keep your provider token secret; anyone with it controls your node and payouts.</P>
@@ -751,11 +756,11 @@ console.log(r.choices[0].message.content);`}</Code>
           <Endpoint method="POST" path="/nodes/:id/heartbeat" />
           <Endpoint method="GET" path="/api/provider/earnings" />
           <Endpoint method="POST" path="/api/provider/payout" />
-          <Code title="ONE-LINE INSTALLER">{`# Linux / macOS (incl. Apple Silicon)
-curl -fsSL ${origin}/install.sh | PROVIDER_TOKEN=ggrid_pv_... bash
+          <Code title="ONE-LINE INSTALLER">{`# Windows (PowerShell)
+$env:PROVIDER_TOKEN="ggrid_pv_..."; irm ${origin}/install.ps1 | iex
 
-# Windows (PowerShell)
-$env:PROVIDER_TOKEN="ggrid_pv_..."; irm ${origin}/install.ps1 | iex`}</Code>
+# macOS - Apple Silicon (M4 / M5)
+curl -fsSL ${origin}/install.sh | PROVIDER_TOKEN=ggrid_pv_... bash`}</Code>
         </DocSection>
 
         <DocSection id="errors" title="Errors & limits">

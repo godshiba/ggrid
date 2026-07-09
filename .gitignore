@@ -34,3 +34,10 @@ data/
 *.db-shm
 *.db-wal
 
+# local-only working notes / tooling / npm lock (this is a bun project) - never commit
+.claude/
+WORKLOG-*.md
+package-lock.json
+
+# IMPORTANT: .env МУСТ БЫТЬ ЗАКОММИЧЕН - это конфиг деплоя (DOMAIN и т.д.).
+# Локальные секреты держи в .env.local (он игнорится через *.local выше).

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# GpuGrid - one-step provider installer (Linux / macOS).
+# GpuGrid - one-step provider installer (Linux / macOS, incl. Apple Silicon M1-M5).
 # Installs Ollama + cloudflared (tunnel, no account), exposes the GPU and joins the grid.
 #
 #   PROVIDER_TOKEN=ggrid_pv_... bash install.sh
@@ -9,6 +9,9 @@ set -euo pipefail
 GATEWAY="${GGRID_GATEWAY:-https://gpugrid.app}"; GATEWAY="${GATEWAY%/}"
 MODEL="${MODEL:-llama3:8b}"
 PROVIDER_TOKEN="${PROVIDER_TOKEN:-}"
+OS="$(uname -s)"      # Linux | Darwin
+ARCH="$(uname -m)"    # x86_64 | aarch64 (Linux ARM) | arm64 (Apple Silicon M1-M5)
+mkdir -p "$HOME/.gpugrid"
 
 info() { printf "\033[32m[GpuGrid]\033[0m %s\n" "$1"; }
 
@@ -21,9 +24,35 @@ models_json() {
     | awk 'BEGIN{ORS="";print "["} {if(NR>1)printf ",";printf "\"%s\"",$0} END{print "]"}'
 }
 
+# Human-readable GPU/chip name for the dashboard (best-effort, never fails the run).
+gpu_info() {
+  if [ "$OS" = "Darwin" ]; then
+    sysctl -n machdep.cpu.brand_string 2>/dev/null || echo "Apple Silicon"
+  elif command -v nvidia-smi >/dev/null 2>&1; then
+    nvidia-smi --query-gpu=name --format=csv,noheader 2>/dev/null | head -n1
+  else
+    echo ""
+  fi
+}
+
 # --- 1. Ollama ---
 if ! command -v ollama >/dev/null 2>&1; then
-  info "Installing Ollama..."; curl -fsSL https://ollama.com/install.sh | sh
+  info "Installing Ollama..."
+  if [ "$OS" = "Darwin" ]; then
+    # macOS (Apple Silicon M1-M5 or Intel): the ollama.com/install.sh is Linux-only.
+    if command -v brew >/dev/null 2>&1; then
+      brew install ollama
+    else
+      info "Downloading Ollama for macOS..."
+      curl -fsSL "https://ollama.com/download/Ollama-darwin.zip" -o /tmp/Ollama-darwin.zip
+      ditto -x -k /tmp/Ollama-darwin.zip /Applications/ >/dev/null 2>&1 || true
+      export PATH="/Applications/Ollama.app/Contents/Resources:$PATH"
+    fi
+    command -v ollama >/dev/null 2>&1 \
+      || { echo "Could not install Ollama automatically. Get it from https://ollama.com/download, then re-run."; exit 1; }
+  else
+    curl -fsSL https://ollama.com/install.sh | sh
+  fi
 fi
 if ! curl -fsS http://localhost:11434/api/tags >/dev/null 2>&1; then
   info "Starting Ollama..."; (ollama serve >/dev/null 2>&1 &)
@@ -31,17 +60,31 @@ if ! curl -fsS http://localhost:11434/api/tags >/dev/null 2>&1; then
 fi
 info "Downloading model '$MODEL' (first run can be a few GB)..."; ollama pull "$MODEL"
 
+# --- macOS: keep the machine awake so the node doesn't drop when idle ---
+# caffeinate stops sleep, NOT overheating - a fanless MacBook Air still throttles
+# under sustained load; that is detected server-side and labelled BURST.
+if [ "$OS" = "Darwin" ] && command -v caffeinate >/dev/null 2>&1; then
+  caffeinate -dimsu -w $$ >/dev/null 2>&1 &
+  info "caffeinate on - this Mac won't sleep while the node runs."
+fi
+
 # --- 2. cloudflared ---
 if ! command -v cloudflared >/dev/null 2>&1; then
   info "Installing cloudflared..."
-  mkdir -p "$HOME/.gpugrid"; base="https://github.com/cloudflare/cloudflared/releases/latest/download"
-  case "$(uname -s)-$(uname -m)" in
-    Linux-x86_64)  curl -fsSL "$base/cloudflared-linux-amd64"  -o "$HOME/.gpugrid/cloudflared";;
-    Linux-aarch64) curl -fsSL "$base/cloudflared-linux-arm64"  -o "$HOME/.gpugrid/cloudflared";;
-    Darwin-*)      curl -fsSL "$base/cloudflared-darwin-amd64.tgz" -o /tmp/cf.tgz; tar -xzf /tmp/cf.tgz -C "$HOME/.gpugrid";;
-    *) echo "Install cloudflared manually: https://github.com/cloudflare/cloudflared/releases"; exit 1;;
-  esac
-  chmod +x "$HOME/.gpugrid/cloudflared"; export PATH="$HOME/.gpugrid:$PATH"
+  base="https://github.com/cloudflare/cloudflared/releases/latest/download"
+  if [ "$OS" = "Darwin" ] && command -v brew >/dev/null 2>&1; then
+    brew install cloudflared
+  else
+    case "$OS-$ARCH" in
+      Linux-x86_64)   curl -fsSL "$base/cloudflared-linux-amd64"  -o "$HOME/.gpugrid/cloudflared";;
+      Linux-aarch64)  curl -fsSL "$base/cloudflared-linux-arm64"  -o "$HOME/.gpugrid/cloudflared";;
+      Darwin-arm64)   curl -fsSL "$base/cloudflared-darwin-arm64.tgz" -o /tmp/cf.tgz; tar -xzf /tmp/cf.tgz -C "$HOME/.gpugrid";;  # M1-M5
+      Darwin-x86_64)  curl -fsSL "$base/cloudflared-darwin-amd64.tgz" -o /tmp/cf.tgz; tar -xzf /tmp/cf.tgz -C "$HOME/.gpugrid";;  # Intel Mac
+      *) echo "Install cloudflared manually: https://github.com/cloudflare/cloudflared/releases"; exit 1;;
+    esac
+    chmod +x "$HOME/.gpugrid/cloudflared"
+  fi
+  export PATH="$HOME/.gpugrid:$PATH"
 fi
 
 # --- 3. open tunnel ---
@@ -58,14 +101,24 @@ done
 info "Your node URL: $PUBLIC_URL"
 
 # --- 4. register ---
-# Best-effort GPU name so the node shows up labelled in the marketplace.
-GPU=""
-if command -v nvidia-smi >/dev/null 2>&1; then
-  GPU="$(nvidia-smi --query-gpu=name --format=csv,noheader 2>/dev/null | head -n1)"
+# On Apple Silicon we register as a "metal" node and send chip / memory / fanless
+# so the gateway can label the node and route long jobs away from a fanless Air.
+# Linux/NVIDIA nodes register as before (backend defaults to cuda).
+GPU="$(gpu_info)"
+EXTRA=""
+if [ "$OS" = "Darwin" ]; then
+  HW="$(system_profiler SPHardwareDataType 2>/dev/null || true)"
+  CHIP="$(printf '%s' "$HW" | awk -F': ' '/Chip/{print $2; exit}' | tr -d '"')"
+  [ -n "$CHIP" ] && GPU="$CHIP"
+  MODEL_NAME="$(printf '%s' "$HW" | awk -F': ' '/Model Name/{print $2; exit}')"
+  MEM_GB="$(printf '%s' "$HW" | awk -F': ' '/Memory/{print $2; exit}' | grep -oE '[0-9]+' | head -n1 || true)"
+  case "$MODEL_NAME" in *"MacBook Air"*) FANLESS=true;; *) FANLESS=false;; esac
+  EXTRA=",\"backend\":\"metal\",\"chip\":\"$GPU\",\"fanless\":$FANLESS"
+  [ -n "$MEM_GB" ] && EXTRA="$EXTRA,\"memGb\":$MEM_GB"
+  info "Apple Silicon: ${GPU:-unknown}${MEM_GB:+, ${MEM_GB}GB}, fanless=$FANLESS → joining the grid..."
 fi
-GPU="$(printf '%s' "$GPU" | tr -d '"')"
 REG="$(curl -fsS -X POST "$GATEWAY/nodes/register" -H "content-type: application/json" \
-  -d "{\"url\":\"$PUBLIC_URL\",\"models\":$(models_json),\"gpuInfo\":\"$GPU\",\"providerToken\":\"$PROVIDER_TOKEN\"}")"
+  -d "{\"url\":\"$PUBLIC_URL\",\"models\":$(models_json),\"gpuInfo\":\"$GPU\",\"providerToken\":\"$PROVIDER_TOKEN\"$EXTRA}")"
 NODE_ID="$(echo "$REG"   | grep -oE '"nodeId":"[^"]+"'     | sed 's/"nodeId":"//; s/"$//')"
 NODE_SECRET="$(echo "$REG" | grep -oE '"nodeSecret":"[^"]+"' | sed 's/"nodeSecret":"//; s/"$//')"
 [ -n "$NODE_ID" ] || { echo "Registration failed: $REG"; kill "$CF_PID" 2>/dev/null || true; exit 1; }

@@ -12,6 +12,12 @@ const regSchema = z.object({
   gpuInfo: z.unknown().optional(),
   providerToken: z.string().min(1),
   priceFactor: z.number().optional(), // provider can bid cheaper to win jobs
+  // --- Apple-Silicon ("metal") tier ---
+  backend: z.enum(['cuda', 'metal']).optional(), // metal nodes go through the benchmark gate
+  chip: z.string().optional(), // e.g. 'Apple M5 Max'
+  memGb: z.number().optional(),
+  fanless: z.boolean().optional(), // MacBook Air (no active cooling)
+  caps: z.array(z.string()).optional(), // endpoints served: ['chat','embeddings']
 })
 
 // A provider's agent registers a node (after Ollama + tunnel are up).
@@ -28,8 +34,14 @@ nodes.post('/register', async (c) => {
   const id = uid('nod_')
   const secret = randToken('ggrid_node_')
   const priceFactor = Math.min(3, Math.max(0.5, p.data.priceFactor ?? 1.0))
+  const backend = p.data.backend ?? 'cuda'
+  // All nodes (incl. Apple Silicon "metal") join and serve immediately. Metadata
+  // (chip / memory / fanless) is still captured for labelling + thermal-aware
+  // routing. (A measured hardware-verification gate is planned for a later update.)
+  const state = 'verified'
+  const caps = JSON.stringify(p.data.caps ?? ['chat', 'embeddings'])
   db.query(
-    'INSERT INTO nodes (id,provider_id,url,secret_hash,source,models,gpu_info,reliability,price_factor,created_at) VALUES (?,?,?,?,?,?,?,?,?,?)',
+    'INSERT INTO nodes (id,provider_id,url,secret_hash,source,models,gpu_info,reliability,price_factor,backend,chip,mem_gb,fanless,caps,state,created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
   ).run(
     id,
     prov.id,
@@ -40,10 +52,16 @@ nodes.post('/register', async (c) => {
     p.data.gpuInfo ? JSON.stringify(p.data.gpuInfo) : null,
     1.0,
     priceFactor,
+    backend,
+    p.data.chip ?? null,
+    p.data.memGb ?? null,
+    p.data.fanless ? 1 : 0,
+    caps,
+    state,
     now(),
   )
   touch(id, 'ONLINE')
-  return c.json({ nodeId: id, nodeSecret: secret })
+  return c.json({ nodeId: id, nodeSecret: secret, state })
 })
 
 const beatSchema = z.object({

@@ -53,15 +53,35 @@ export function getNode(id: string): NodeRow | null {
   return (db.query('SELECT * FROM nodes WHERE id = ?').get(id) as NodeRow) ?? null
 }
 
+// Which endpoints a node advertises (defaults to both for legacy nodes).
+export function nodeCaps(n: NodeRow): string[] {
+  try {
+    const c = JSON.parse(n.caps ?? '["chat","embeddings"]')
+    return Array.isArray(c) && c.length ? (c as string[]) : ['chat', 'embeddings']
+  } catch {
+    return ['chat', 'embeddings']
+  }
+}
+
 // Pick the best live node serving `model`: cheapest first (price_factor), then
 // fastest (perf), most reliable, least busy. Nodes below the reliability floor
-// are quarantined (auto-slashed) out of routing entirely.
-export function selectNode(model: string, exclude?: Set<string>): NodeRow | null {
+// are quarantined (auto-slashed) out of routing entirely. The `state` guard is a
+// forward-compat hook (all nodes are currently 'verified'). A `longJob` (streaming
+// or high max_tokens) prefers cooled nodes - a fanless MacBook Air throttles under
+// sustained load, so it takes long jobs only as a fallback.
+export function selectNode(
+  model: string,
+  exclude?: Set<string>,
+  opts: { endpoint?: 'chat' | 'embeddings'; longJob?: boolean } = {},
+): NodeRow | null {
+  const endpoint = opts.endpoint ?? 'chat'
   const rows = db.query('SELECT * FROM nodes').all() as NodeRow[]
   const candidates = rows
     .map((n) => ({ n, models: JSON.parse(n.models) as string[], l: live.get(n.id) }))
     .filter((x) => !exclude?.has(x.n.id))
     .filter((x) => x.models.includes(model))
+    .filter((x) => (x.n.state ?? 'verified') === 'verified')
+    .filter((x) => nodeCaps(x.n).includes(endpoint))
     .filter((x) => !!x.l && Date.now() - x.l.lastBeat < config.heartbeatTtlMs)
     .filter((x) => x.l!.activeJobs < config.maxConcurrencyPerNode)
     .filter((x) => x.n.reliability >= config.minReliability)
@@ -71,6 +91,11 @@ export function selectNode(model: string, exclude?: Set<string>): NodeRow | null
       if (a.n.reliability !== b.n.reliability) return b.n.reliability - a.n.reliability
       return a.l!.activeJobs - b.l!.activeJobs
     })
+  if (opts.longJob) {
+    // Prefer actively-cooled nodes for sustained work; fall back to hot ones.
+    const cooled = candidates.filter((x) => !x.n.fanless && !x.n.thermal_limited)
+    return (cooled[0] ?? candidates[0])?.n ?? null
+  }
   return candidates[0]?.n ?? null
 }
 
@@ -103,12 +128,27 @@ export function recordPerf(nodeId: string, tokensPerSec: number): void {
   db.query('UPDATE nodes SET perf=?, jobs_done=jobs_done+1 WHERE id=?').run(perf, nodeId)
 }
 
+// Coarse class label for a node (chip for Apple-Silicon, else backend/source).
+export function tierLabel(n: NodeRow): string {
+  if (n.backend === 'metal') return n.chip || 'Apple Silicon'
+  if (n.source === 'RUNPOD') return 'Cloud'
+  return 'CUDA'
+}
+
 // Public-facing view of a node's quality (for dashboards / admin).
 export function nodeStats(n: NodeRow) {
   return {
     id: n.id,
     url: n.url,
     source: n.source,
+    backend: n.backend ?? 'cuda',
+    chip: n.chip ?? null,
+    memGb: n.mem_gb ?? null,
+    fanless: !!n.fanless,
+    thermalLimited: !!n.thermal_limited,
+    tier: tierLabel(n),
+    state: n.state ?? 'verified',
+    caps: nodeCaps(n),
     models: JSON.parse(n.models) as string[],
     priceFactor: n.price_factor,
     reliability: Math.round(n.reliability * 100) / 100,
@@ -117,6 +157,7 @@ export function nodeStats(n: NodeRow) {
     uptimePct: uptimePct(n.id),
     online: isOnline(n.id),
     quarantined: n.reliability < config.minReliability,
+    verifyError: n.verify_error ?? null,
   }
 }
 
@@ -154,6 +195,13 @@ export function listNodes(opts: { includeOffline?: boolean } = {}) {
         id: n.id,
         gpu: gpuLabel(n),
         source: n.source,
+        backend: n.backend ?? 'cuda',
+        chip: n.chip ?? null,
+        memGb: n.mem_gb ?? null,
+        fanless: !!n.fanless,
+        thermalLimited: !!n.thermal_limited,
+        tier: tierLabel(n),
+        state: n.state ?? 'verified',
         models: JSON.parse(n.models) as string[],
         priceFactor: n.price_factor,
         reliability: Math.round(n.reliability * 100) / 100,
@@ -165,6 +213,8 @@ export function listNodes(opts: { includeOffline?: boolean } = {}) {
         quarantined: n.reliability < config.minReliability,
       }
     })
+    // state guard (forward-compat; all nodes are currently 'verified').
+    .filter((n) => (n.state ?? 'verified') === 'verified')
     .filter((n) => opts.includeOffline || n.online)
     .sort((a, b) => {
       if (a.online !== b.online) return a.online ? -1 : 1
@@ -177,11 +227,17 @@ export function listNodes(opts: { includeOffline?: boolean } = {}) {
 // Resolve a developer-pinned node for a request. Returns the row to proxy to,
 // or an error string explaining why the pin can't be honored (→ 409, no
 // silent fallback: the choice was explicit).
-export function nodeForRequest(nodeId: string, model: string): { node: NodeRow } | { error: string } {
+export function nodeForRequest(
+  nodeId: string,
+  model: string,
+  endpoint: 'chat' | 'embeddings' = 'chat',
+): { node: NodeRow } | { error: string } {
   const n = getNode(nodeId)
   if (!n) return { error: `unknown GPU node '${nodeId}'` }
+  if ((n.state ?? 'verified') !== 'verified') return { error: `GPU '${nodeId}' is not verified` }
   const models = JSON.parse(n.models) as string[]
   if (!models.includes(model)) return { error: `GPU '${nodeId}' does not serve model '${model}'` }
+  if (!nodeCaps(n).includes(endpoint)) return { error: `GPU '${nodeId}' does not serve ${endpoint} requests` }
   if (!isOnline(n.id)) return { error: `GPU '${nodeId}' is offline` }
   if (n.reliability < config.minReliability) return { error: `GPU '${nodeId}' is quarantined` }
   const active = live.get(n.id)?.activeJobs ?? 0

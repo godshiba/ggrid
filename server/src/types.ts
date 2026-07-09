@@ -18,6 +18,19 @@ export interface NodeRow {
   price_factor: number
   perf: number // EWMA throughput, tokens/sec
   jobs_done: number
+  // --- Apple-Silicon ("metal") tier + verification gate ---
+  backend: 'cuda' | 'metal' | string
+  chip: string | null // e.g. 'Apple M5 Max'
+  mem_gb: number | null
+  fanless: number // 1 = MacBook Air (no active cooling)
+  caps: string // JSON array of endpoints: ['chat','embeddings']
+  state: 'provisional' | 'verified' | 'rejected' | string
+  bench_perf: number // measured sustained tokens/sec at verify time
+  thermal_ratio: number | null // last/first sustained sample (<1 = throttled)
+  thermal_limited: number // 1 = throttles under sustained load
+  tier: string | null
+  verify_error: string | null
+  verified_at: number | null
   created_at: number
 }
 

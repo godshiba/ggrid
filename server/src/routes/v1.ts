@@ -51,17 +51,25 @@ async function handleProxy(c: any, endpoint: Endpoint): Promise<Response> {
   const pin = (c.req.header('x-ggrid-node') || (typeof body.node === 'string' ? body.node : '') || '').trim()
   if (typeof body.node !== 'undefined') delete body.node // never forward to Ollama
   if (pin) {
-    const r = nodeForRequest(pin, model)
+    const r = nodeForRequest(pin, model, endpoint)
     if ('error' in r) return c.json({ error: { message: r.error, type: 'node_unavailable' } }, 409)
     const res = await tryProxy({ userId: user.id, node: r.node, model, body, endpoint })
     if (res) return res
     return c.json({ error: { message: `pinned GPU '${pin}' failed`, type: 'upstream_error' } }, 502)
   }
 
+  // A streaming chat, or one asking for many output tokens, is a "long job" →
+  // routed away from fanless / thermal-limited (Air) nodes when a cooled node is
+  // free, since those throttle under sustained load.
+  const longJob =
+    endpoint === 'chat' &&
+    (!!body.stream || (typeof body.max_tokens === 'number' && body.max_tokens > config.routing.longJobTokens))
+  const pick = (tried?: Set<string>) => selectNode(model, tried, { endpoint, longJob })
+
   // Try the best node. The RunPod fallback costs us real money, so it's gated
   // to paid/allowed users - free signups can only use community GPUs.
   const tried = new Set<string>()
-  let node = selectNode(model)
+  let node = pick()
   if (!node && (user.runpod_allowed || config.freeTierRunpod)) node = await ensureNode(model)
   let attempted = false
   for (let i = 0; i < 2 && node; i++) {
@@ -69,7 +77,7 @@ async function handleProxy(c: any, endpoint: Endpoint): Promise<Response> {
     const res = await tryProxy({ userId: user.id, node, model, body, endpoint })
     if (res) return res
     tried.add(node.id)
-    node = selectNode(model, tried)
+    node = pick(tried)
   }
 
   return c.json(

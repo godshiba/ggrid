@@ -2,5 +2,5 @@
   "name": "gpugrid",
   "version": "0.1.0",
   "private": true,
-  "description": "GpuGrid — decentralized GPU compute gateway + site. Monorepo: web/ (Vite React) + server/ (Bun gateway). Deployed via the root Dockerfile in docker-db mode; this root package.json only satisfies the platform CI's repo-root check (the Docker build uses web/ and server/ directly)."
+  "description": "GpuGrid - decentralized GPU compute gateway + site. Monorepo: web/ (Vite React) + server/ (Bun gateway). Deployed via the root Dockerfile in docker-db mode; this root package.json only satisfies the platform CI's repo-root check (the Docker build uses web/ and server/ directly)."
 }

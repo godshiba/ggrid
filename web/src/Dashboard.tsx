@@ -559,6 +559,19 @@ function Marketplace({ origin, apiKeyHint }: { origin: string; apiKeyHint: strin
                     <span style={{ fontFamily: 'var(--mono)', fontSize: 9, letterSpacing: '.1em', color: DIM, border: '1px solid rgba(140,158,176,.22)', borderRadius: 5, padding: '2px 6px' }}>
                       {n.source}
                     </span>
+                    {n.backend === 'metal' && (
+                      <span style={{ fontFamily: 'var(--mono)', fontSize: 9, letterSpacing: '.1em', color: '#c7b3ff', border: '1px solid rgba(160,130,255,.4)', borderRadius: 5, padding: '2px 6px' }}>
+                        METAL
+                      </span>
+                    )}
+                    {(n.fanless || n.thermalLimited) && (
+                      <span
+                        title="Fanless / throttles under sustained load - best for short bursts, not long streaming jobs."
+                        style={{ fontFamily: 'var(--mono)', fontSize: 9, letterSpacing: '.1em', color: '#ffb570', border: '1px solid rgba(255,150,60,.45)', borderRadius: 5, padding: '2px 6px' }}
+                      >
+                        BURST
+                      </span>
+                    )}
                   </div>
                   <span style={{ fontFamily: 'var(--mono)', fontSize: 11, color: active ? ACCENT : DIM }}>
                     {active ? '✓ pinned' : busy ? 'at capacity' : 'pick'}
@@ -1321,8 +1334,8 @@ function EarningsCalculator() {
 
 function Requirements() {
   const reqs: [string, string][] = [
-    ['GPU', 'NVIDIA with 8 GB+ VRAM, or Apple Silicon (M1-M5). More VRAM runs bigger models.'],
-    ['OS', 'Windows, Linux, or macOS - a one-line installer for each.'],
+    ['GPU', 'NVIDIA with 8 GB+ VRAM, or an Apple Silicon Mac (M4 / M5). More VRAM / memory runs bigger models.'],
+    ['OS', 'Windows (PowerShell) or macOS (Apple Silicon) - a one-line installer for each.'],
     ['Software', 'Ollama + a secure Cloudflare tunnel, both installed automatically. No account, no port-forwarding.'],
     ['Uptime', 'Keep the window open to stay online. The more reliable you are, the more jobs route to you.'],
   ]
@@ -1605,11 +1618,12 @@ function Provider() {
   }
 
   const origin = window.location.origin
-  const install = `# Linux / macOS - installs Ollama + a secure tunnel, then joins the grid
-curl -fsSL ${origin}/install.sh | PROVIDER_TOKEN=${nodeToken} bash
+  const install = `# Windows (PowerShell) - installs Ollama + a secure tunnel, then joins the grid
+$env:PROVIDER_TOKEN="${nodeToken}"; irm ${origin}/install.ps1 | iex
 
-# Windows (PowerShell)
-$env:PROVIDER_TOKEN="${nodeToken}"; irm ${origin}/install.ps1 | iex`
+# macOS - Apple Silicon (M4 / M5 recommended). A MacBook Air runs but throttles
+# under sustained load (flagged "burst") - a cooled Mac (Pro / mini / Studio) earns more.
+curl -fsSL ${origin}/install.sh | PROVIDER_TOKEN=${nodeToken} bash`
 
   const nav = [
     { id: 'overview', label: 'Overview' },

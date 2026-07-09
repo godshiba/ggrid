@@ -125,6 +125,21 @@ for (const ddl of [
   'ALTER TABLE nodes ADD COLUMN price_factor REAL NOT NULL DEFAULT 1.0',
   'ALTER TABLE nodes ADD COLUMN perf REAL NOT NULL DEFAULT 0',
   'ALTER TABLE nodes ADD COLUMN jobs_done INTEGER NOT NULL DEFAULT 0',
+  // --- Apple-Silicon ("metal") node tier + measured verification gate ---
+  // Existing rows default to backend 'cuda' and state 'verified' so the live
+  // network is untouched; only new metal nodes enter the benchmark gate.
+  "ALTER TABLE nodes ADD COLUMN backend TEXT NOT NULL DEFAULT 'cuda'", // 'cuda' | 'metal'
+  'ALTER TABLE nodes ADD COLUMN chip TEXT', // e.g. 'Apple M5 Max' (self-reported, cross-checked by bench)
+  'ALTER TABLE nodes ADD COLUMN mem_gb INTEGER', // unified memory, GB
+  'ALTER TABLE nodes ADD COLUMN fanless INTEGER NOT NULL DEFAULT 0', // 1 = MacBook Air (no active cooling)
+  'ALTER TABLE nodes ADD COLUMN caps TEXT NOT NULL DEFAULT \'["chat","embeddings"]\'', // endpoints this node serves
+  "ALTER TABLE nodes ADD COLUMN state TEXT NOT NULL DEFAULT 'verified'", // 'provisional' | 'verified' | 'rejected'
+  'ALTER TABLE nodes ADD COLUMN bench_perf REAL NOT NULL DEFAULT 0', // measured sustained tokens/sec at verify
+  'ALTER TABLE nodes ADD COLUMN thermal_ratio REAL', // last/first sustained sample (<1 = throttled)
+  'ALTER TABLE nodes ADD COLUMN thermal_limited INTEGER NOT NULL DEFAULT 0', // 1 = throttles under sustained load
+  'ALTER TABLE nodes ADD COLUMN tier TEXT', // coarse class label (chip for metal)
+  'ALTER TABLE nodes ADD COLUMN verify_error TEXT', // why a node was rejected
+  'ALTER TABLE nodes ADD COLUMN verified_at INTEGER',
 ]) {
   try {
     db.exec(ddl)
