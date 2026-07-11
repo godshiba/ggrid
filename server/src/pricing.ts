@@ -27,10 +27,10 @@ export function feeSplit(cost: number): {
   stakers: number
   treasury: number
 } {
-  // 75% provider · 25% split as burn 12.5 / stakers 7.5 / treasury 5
+  // 75% provider · 20% stakers · 5% treasury. No burn cut (burn stays 0).
   const provider = Math.floor(cost * 0.75)
-  const burn = Math.floor(cost * 0.125)
-  const stakers = Math.floor(cost * 0.075)
+  const burn = 0
+  const stakers = Math.floor(cost * 0.2)
   const treasury = cost - provider - burn - stakers
   return { provider, burn, stakers, treasury }
 }

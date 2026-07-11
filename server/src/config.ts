@@ -138,10 +138,26 @@ export const config = {
     // (backpressure - beyond this we 503 rather than queue unboundedly).
     queueMaxDepth: num(process.env.QUEUE_MAX_DEPTH, 100),
   },
+
+  // --- $GGRID staking (optional; fully disabled if unset) ---
+  // Stakers earn the 20% cut that ggrid_payout::settle takes out of every job. The
+  // payout program pays that cut into a token account owned by the stake pool PDA, so
+  // the two programs need no direct coupling. stake/unstake/claim are signed by the
+  // USER, so the gateway never needs the authority key here - it only reads the pool
+  // and builds unsigned transactions for the wallet to sign.
+  stake: {
+    programId: process.env.GGRID_STAKE_PROGRAM_ID ?? '',
+  },
 }
 
 // On-chain payouts are live only when the core Solana settings are all present.
 export function solanaConfigured(): boolean {
   const s = config.solana
   return !!(s.rpcUrl && s.programId && s.mint && s.authorityKey)
+}
+
+// Staking needs the RPC, the $GGRID mint and the stake program. No authority key:
+// the staker signs their own stake/unstake/claim.
+export function stakeConfigured(): boolean {
+  return !!(config.solana.rpcUrl && config.solana.mint && config.stake.programId)
 }
