@@ -2,6 +2,8 @@ import { existsSync } from 'node:fs'
 import { serveStatic } from 'hono/bun'
 import { buildApp } from './app'
 import { config, solanaConfigured } from './config'
+import { startRetention } from './retention'
+import { startCanary } from './canary'
 
 const app = buildApp()
 
@@ -15,8 +17,13 @@ if (existsSync(config.webDir)) {
   console.log(`[GpuGrid] serving web from ${config.webDir}`)
 }
 
+// Background workers (all no-ops unless their env knobs are set): purge old usage
+// history per the retention window, and run canary probes against nodes.
+startRetention()
+startCanary()
+
 console.log(
-  `[GpuGrid] gateway listening on :${config.port} · db=${config.dbPath} · runpod=${config.runpodApiKey ? 'on' : 'off'} · payouts=${solanaConfigured() ? 'on' : 'off'}`,
+  `[GpuGrid] gateway listening on :${config.port} · db=${config.dbPath} · runpod=${config.runpodApiKey ? 'on' : 'off'} · payouts=${solanaConfigured() ? 'on' : 'off'} · retention=${config.privacy.retentionDays || 'off'} · spotcheck=${config.integrity.spotcheckRate > 0 ? config.integrity.spotcheckRate : 'off'} · canary=${config.integrity.canaryEnabled ? 'on' : 'off'}`,
 )
 
 // Bun reads this default export to start the HTTP server.

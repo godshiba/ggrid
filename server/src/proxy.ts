@@ -4,6 +4,8 @@ import { priceFor } from './pricing'
 import { settleJob, failJob } from './ledger'
 import { setActive, penalize, reward, recordPerf } from './registry'
 import { markRunpodUse } from './runpod'
+import { spotCheck } from './spotcheck'
+import { extractText } from './probe'
 import type { NodeRow, Usage } from './types'
 
 export type Endpoint = 'chat' | 'embeddings'
@@ -44,7 +46,7 @@ interface Attempt {
 }
 
 // Run one job against one node. Returns a Response on success (or a definitive
-// answer). Returns null if the node failed BEFORE producing output - the caller
+// answer). Returns null if the node failed BEFORE producing output — the caller
 // may then retry on a different node. Billing happens here on completion.
 export async function tryProxy(a: Attempt): Promise<Response | null> {
   const { userId, node, model, body, endpoint } = a
@@ -63,7 +65,7 @@ export async function tryProxy(a: Attempt): Promise<Response | null> {
   const t0 = Date.now()
   let closed = false
 
-  const finish = (u: Usage): void => {
+  const finish = (u: Usage, answer?: string): void => {
     if (closed) return
     closed = true
     const latencyMs = Date.now() - t0
@@ -81,6 +83,19 @@ export async function tryProxy(a: Attempt): Promise<Response | null> {
     setActive(node.id, -1)
     reward(node.id)
     if (u.out > 0) recordPerf(node.id, (u.out / Math.max(1, latencyMs)) * 1000)
+    maybeSpotCheck(u, answer)
+  }
+
+  // Integrity spot-check: on a small sampled fraction of finished chat jobs, kick
+  // off an async audit that replays the prompt on a second node and judges it.
+  // Fire-and-forget — it runs after the user has their response and can never
+  // affect, delay, or bill this request. Skipped entirely when the rate is 0.
+  const maybeSpotCheck = (u: Usage, answer?: string): void => {
+    if (endpoint !== 'chat' || config.integrity.spotcheckRate <= 0) return
+    if (typeof answer !== 'string' || u.out < config.integrity.spotcheckMinTokensOut) return
+    if (!Array.isArray(body.messages) || body.messages.length === 0) return
+    if (Math.random() >= config.integrity.spotcheckRate) return
+    void spotCheck({ model, messages: body.messages, firstNodeId: node.id, firstAnswer: answer }).catch(() => {})
   }
   const fail = (msg: string): void => {
     if (closed) return
@@ -120,7 +135,8 @@ export async function tryProxy(a: Attempt): Promise<Response | null> {
       fail('upstream read failed: ' + String(e))
       return null // retryable
     }
-    finish({ in: data?.usage?.prompt_tokens ?? 0, out: data?.usage?.completion_tokens ?? 0 })
+    const answer = typeof data?.choices?.[0]?.message?.content === 'string' ? data.choices[0].message.content : ''
+    finish({ in: data?.usage?.prompt_tokens ?? 0, out: data?.usage?.completion_tokens ?? 0 }, answer)
     return json(data, 200)
   }
 
@@ -157,7 +173,7 @@ export async function tryProxy(a: Attempt): Promise<Response | null> {
       try {
         const { done, value } = await reader.read()
         if (done) {
-          finish(extractUsage(acc))
+          finish(extractUsage(acc), extractText(acc))
           controller.close()
           return
         }

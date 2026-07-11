@@ -273,6 +273,26 @@ api.get('/pricing', (c) => {
   })
 })
 
+// ---------- public: privacy & integrity posture ----------
+// Truthful, machine-readable statement of what the gateway does with request
+// content and how it audits nodes. Lets the site/docs state guarantees without
+// hardcoding them. No auth: these are public policy facts, not secrets.
+api.get('/privacy', (c) => {
+  return c.json({
+    // Prompt and completion CONTENT is never written to the DB or the logs.
+    storesPromptContent: config.privacy.storePrompts, // always false
+    storesCompletionContent: config.privacy.storePrompts, // always false
+    // Per-job metadata kept (model, token counts, cost, latency, status).
+    usageMetadataRetentionDays: config.privacy.retentionDays, // 0 = until account deletion
+    // Node integrity audits currently active on this gateway.
+    integrity: {
+      spotCheck: config.integrity.spotcheckRate > 0, // replay a sample on a 2nd node + judge
+      spotCheckRate: config.integrity.spotcheckRate,
+      canary: config.integrity.canaryEnabled, // known-answer probes catch model spoofing
+    },
+  })
+})
+
 // ---------- public: GPU marketplace ----------
 // Safe catalogue of live GPUs so developers can pick a node to pin (via the
 // x-ggrid-node header). Never exposes node url/secret. ?all=1 includes offline.

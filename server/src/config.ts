@@ -6,6 +6,11 @@ function num(v: string | undefined, d: number): number {
   return Number.isFinite(n) ? n : d
 }
 
+function clamp01(v: string | undefined, d: number): number {
+  const n = Number(v ?? d)
+  return Number.isFinite(n) ? Math.max(0, Math.min(1, n)) : d
+}
+
 export const config = {
   // Port the gateway listens on (platform sets APP_PORT for docker).
   port: num(process.env.APP_PORT ?? process.env.PORT, 8080),
@@ -123,6 +128,39 @@ export const config = {
     longJobTokens: num(process.env.LONG_JOB_TOKENS, 256),
     // Per-benchmark upstream timeout (cold generations on a fresh node are slow).
     benchTimeoutMs: num(process.env.VERIFY_BENCH_TIMEOUT_MS, 120_000),
+  },
+
+  // --- Privacy: prompt/response content is NEVER persisted or logged ---
+  // The gateway proxies request bodies in memory only; nothing about the content
+  // of a prompt or a completion is written to the database or the logs. The only
+  // per-job record kept is metadata (model, token counts, cost, latency, status).
+  // `retentionDays` optionally purges even that usage history after N days; the
+  // financial ledger (charges/payouts) is always kept as the money trail.
+  privacy: {
+    storePrompts: false as const, // hard guarantee — no code path persists prompt/answer text
+    retentionDays: num(process.env.JOB_RETENTION_DAYS, 0), // 0 = keep usage history until account deletion
+    sweepMs: num(process.env.RETENTION_SWEEP_MS, 6 * 60 * 60_000), // how often the purge runs
+  },
+
+  // --- Integrity: catch a node that returns junk or fakes the model it serves ---
+  // Two independent, best-effort audits. Both are OFF by default (additive — the
+  // live network is unaffected until enabled) and NEVER block or bill a user job,
+  // and NEVER persist prompt/answer content.
+  integrity: {
+    // Spot-check: replay a small fraction of finished chat jobs on a SECOND node
+    // and have a judge model decide if the two answers agree in meaning. A node
+    // whose answer diverges is penalized (→ quarantined if it keeps failing).
+    spotcheckRate: clamp01(process.env.SPOTCHECK_RATE, 0), // 0..1, e.g. 0.03 = 3% of jobs
+    spotcheckJudgeModel: process.env.SPOTCHECK_JUDGE_MODEL ?? '', // '' → judge with the same model
+    spotcheckMinTokensOut: num(process.env.SPOTCHECK_MIN_TOKENS_OUT, 12), // skip trivial replies
+    spotcheckMaxTokens: num(process.env.SPOTCHECK_MAX_TOKENS, 512), // cap the shadow replay
+    // Canary: periodically ask each node a prompt with a KNOWN answer for the model
+    // it claims. A node serving a smaller model than advertised fails the hard ones.
+    canaryEnabled: process.env.CANARY_ENABLED === '1',
+    canaryIntervalMs: num(process.env.CANARY_INTERVAL_MS, 10 * 60_000),
+    canaryMaxTokens: num(process.env.CANARY_MAX_TOKENS, 64),
+    canaryFailThreshold: num(process.env.CANARY_FAIL_THRESHOLD, 2), // fails per round before penalize
+    probeTimeoutMs: num(process.env.INTEGRITY_PROBE_TIMEOUT_MS, 60_000), // per shadow/probe request
   },
 
   // --- Resilient routing: failover + capacity queue ---
