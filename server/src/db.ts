@@ -120,8 +120,8 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_deposit_sig ON deposit_intents(signature) 
 // Idempotent migrations for databases created before a column existed.
 for (const ddl of [
   'ALTER TABLE users ADD COLUMN runpod_allowed INTEGER NOT NULL DEFAULT 0',
-  'ALTER TABLE users ADD COLUMN privy_id TEXT', // Privy identity (did:privy:...) - console login
-  'ALTER TABLE providers ADD COLUMN privy_id TEXT', // Privy identity - provider console login
+  'ALTER TABLE users ADD COLUMN privy_id TEXT', // Privy identity (did:privy:...) — console login
+  'ALTER TABLE providers ADD COLUMN privy_id TEXT', // Privy identity — provider console login
   'ALTER TABLE nodes ADD COLUMN price_factor REAL NOT NULL DEFAULT 1.0',
   'ALTER TABLE nodes ADD COLUMN perf REAL NOT NULL DEFAULT 0',
   'ALTER TABLE nodes ADD COLUMN jobs_done INTEGER NOT NULL DEFAULT 0',
@@ -140,6 +140,11 @@ for (const ddl of [
   'ALTER TABLE nodes ADD COLUMN tier TEXT', // coarse class label (chip for metal)
   'ALTER TABLE nodes ADD COLUMN verify_error TEXT', // why a node was rejected
   'ALTER TABLE nodes ADD COLUMN verified_at INTEGER',
+  // --- Free tier: request counter granted at signup (billed to the sandbox fund) ---
+  'ALTER TABLE users ADD COLUMN free_requests INTEGER NOT NULL DEFAULT 0',
+  // --- Node geo: coarse "City, CC" for the marketplace / playground meta line.
+  // Resolved once from the node's public address; the IP itself is never stored.
+  'ALTER TABLE nodes ADD COLUMN geo TEXT',
 ]) {
   try {
     db.exec(ddl)

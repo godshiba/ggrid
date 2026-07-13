@@ -4,6 +4,7 @@ import { scroll } from './scroll'
 import { session } from './session'
 import { api as gateway, type Stats } from './api'
 import Bubbles from './Bubbles'
+import Playground from './Playground'
 
 const compact = (n: number) => new Intl.NumberFormat('en', { notation: 'compact', maximumFractionDigits: 1 }).format(n)
 
@@ -731,8 +732,7 @@ function CodeTerminal() {
 
 const SPLIT: [string, string][] = [
   ['Providers', '75%'],
-  ['Burn', '12.5%'],
-  ['Stakers', '7.5%'],
+  ['Stakers', '20%'],
   ['Treasury', '5%'],
 ]
 function SplitBars() {
@@ -1309,6 +1309,30 @@ function Site() {
           </Reveal>
         </section>
 
+        {/* LEVEL 00 - PLAYGROUND (try the grid with zero setup) */}
+        <section style={SECTION}>
+          <div className="grid2">
+            <div>
+              <Marker no="//00" name="PLAYGROUND" depth="−180 m" />
+              <Reveal delay={90}>
+                <h2 style={H2()}>
+                  <Scramble text="Try the grid" style={{ display: 'block' }} />
+                  <Scramble text="right now" style={{ display: 'block', fontWeight: 400 }} />
+                </h2>
+              </Reveal>
+              <Reveal delay={180}>
+                <p style={BODY}>
+                  No signup, no card. Your prompt runs on a real community GPU and comes back with the receipt - whose card,
+                  which city, and the exact price. That line is the whole product.
+                </p>
+              </Reveal>
+            </div>
+            <Reveal dir="right" delay={120}>
+              <Playground />
+            </Reveal>
+          </div>
+        </section>
+
         {/* LEVEL 01 - NETWORK */}
         <section style={SECTION}>
           <div className="grid2">
@@ -1442,12 +1466,13 @@ function Site() {
               </Reveal>
               <Reveal delay={320}>
                 <p style={{ margin: '26px 0 0', maxWidth: 460, fontFamily: 'var(--mono)', fontSize: 12.5, lineHeight: 1.75, color: '#8fa3b5' }}>
-                  Settlement runs on Solana. Compute is metered off-chain today; the on-chain payout splitter is written and
-                  validated on devnet - deposits into the vault and provider payouts are live-tested there.
+                  Settlement runs on Solana. Compute is metered off-chain; the on-chain payout splitter and the staking
+                  program are both deployed and verified on mainnet.
                 </p>
               </Reveal>
               <Reveal delay={340}>
-                <div
+                <a
+                  href="#/staking"
                   style={{
                     marginTop: 30,
                     maxWidth: 440,
@@ -1458,6 +1483,7 @@ function Site() {
                     border: '1px solid rgba(95,212,226,.22)',
                     borderRadius: 12,
                     background: 'rgba(95,212,226,.045)',
+                    textDecoration: 'none',
                   }}
                 >
                   <div>
@@ -1479,9 +1505,9 @@ function Site() {
                       whiteSpace: 'nowrap',
                     }}
                   >
-                    SOON
+                    LIVE →
                   </span>
-                </div>
+                </a>
               </Reveal>
             </div>
             <SplitBars />
@@ -1597,7 +1623,7 @@ export default function App() {
       </Suspense>
     )
   }
-  if (route === 'pricing' || route === 'docs' || route === 'stats') {
+  if (route === 'pricing' || route === 'docs' || route === 'stats' || route === 'staking') {
     return (
       <Suspense fallback={null}>
         <Pages page={route} />

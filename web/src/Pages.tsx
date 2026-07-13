@@ -1,5 +1,9 @@
-import { useCallback, useEffect, useState, type CSSProperties, type ReactNode } from 'react'
-import { api, usd, type Pricing as PricingData, type Stats, type GpuNode } from './api'
+import { lazy, Suspense, useCallback, useEffect, useState, type CSSProperties, type ReactNode } from 'react'
+import { api, usd, type Pricing as PricingData, type Stats, type GpuNode, type TokenInfo } from './api'
+
+// The staking panel lives in the (heavy) console module; lazy-load it so the light
+// public pages don't pull in Privy/3D. Same <Staking /> the developer console mounts.
+const StakingPanel = lazy(() => import('./Dashboard').then((m) => ({ default: m.Staking })))
 
 /* ============================================================
    Public content pages: Pricing, API docs, Network stats.
@@ -25,9 +29,10 @@ const NAV: { id: PageId; label: string }[] = [
   { id: 'pricing', label: 'Pricing' },
   { id: 'docs', label: 'API Docs' },
   { id: 'stats', label: 'Network' },
+  { id: 'staking', label: 'Staking' },
 ]
 
-export type PageId = 'pricing' | 'docs' | 'stats'
+export type PageId = 'pricing' | 'docs' | 'stats' | 'staking'
 
 function Btn({ children, href, kind = 'cyan', onClick }: { children: ReactNode; href?: string; kind?: 'cyan' | 'ghost'; onClick?: () => void }) {
   const base: CSSProperties = {
@@ -328,17 +333,24 @@ function Pricing() {
           <div>
             <div style={{ ...LABEL, color: ACCENT }}>FREE PLAN</div>
             <div style={{ fontFamily: 'var(--display)', fontWeight: 300, fontSize: 34, color: INK, marginTop: 8 }}>
-              {free ? `$${free.signupBonusUsd.toFixed(0)} free credits` : '-'}
+              {free
+                ? free.signupFreeRequests
+                  ? `${free.signupFreeRequests} free requests`
+                  : `$${free.signupBonusUsd.toFixed(0)} free credits`
+                : '-'}
             </div>
-            <div style={{ fontFamily: 'var(--display)', fontSize: 14, color: SUB, marginTop: 2 }}>on signup - no card required</div>
+            <div style={{ fontFamily: 'var(--display)', fontSize: 14, color: SUB, marginTop: 2 }}>
+              on signup - no card required{free?.playgroundPerIpPerDay ? ` · plus ${free.playgroundPerIpPerDay}/day in the playground, no account at all` : ''}
+            </div>
           </div>
           <Btn href="#/app">Start free → get API key</Btn>
         </div>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(210px,1fr))', gap: 12, marginTop: 20 }}>
           {[
             ['Community GPUs', free?.communityGpusOnly ? 'Included - the grid’s shared nodes' : 'Included'],
+            ['Playground (no signup)', free?.playgroundPerIpPerDay ? `${free.playgroundPerIpPerDay} requests / day · ${free.playgroundModel ?? 'llama3:8b'}` : '-'],
             ['Rate limit', free ? `${free.rateLimitPerMin} requests / min` : '-'],
-            ['Max output', free ? `${free.maxOutputTokens.toLocaleString('en-US')} tokens / request` : '-'],
+            ['Max output', free?.signupFreeRequests ? `${(free.freeMaxOutputTokens ?? 400).toLocaleString('en-US')} tokens / free request` : free ? `${free.maxOutputTokens.toLocaleString('en-US')} tokens / request` : '-'],
             ['Signups per network', free ? `${free.signupsPerIpPerDay} / day per IP` : '-'],
             ['Cloud fallback (paid GPUs)', 'Unlocked once you top up'],
             ['Billing', 'Metered per token - pay as you go'],
@@ -393,8 +405,7 @@ function Pricing() {
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(150px,1fr))', gap: 12 }}>
           {[
             ['75%', 'GPU provider', ACCENT],
-            ['12.5%', 'Burn', CORE],
-            ['7.5%', 'Stakers', ACCENT],
+            ['20%', 'Stakers', ACCENT],
             ['5%', 'Treasury', CORE],
           ].map(([pct, who, col]) => (
             <div key={who} style={{ padding: '16px 14px', borderRadius: 10, background: 'rgba(6,9,12,.55)', border: '1px solid rgba(140,158,176,.14)' }}>
@@ -499,8 +510,9 @@ function Endpoint({ method, path }: { method: string; path: string }) {
 /* grouped left-nav + flat right "on this page" share these sections */
 const DOC_GROUPS: { group: string; items: [string, string][] }[] = [
   { group: 'Get started', items: [['intro', 'Introduction'], ['auth', 'Authentication']] },
-  { group: 'Core API', items: [['chat', 'Chat completions'], ['stream', 'Streaming'], ['embeddings', 'Embeddings'], ['models', 'List models']] },
+  { group: 'Core API', items: [['chat', 'Chat completions'], ['stream', 'Streaming'], ['embeddings', 'Embeddings'], ['models', 'List models'], ['catalog', 'Models & pricing']] },
   { group: 'Account', items: [['account', 'Account & credits'], ['topup', 'Top up with $GGRID']] },
+  { group: 'Token', items: [['token', '$GGRID token']] },
   { group: 'Providers', items: [['guide', 'Run a GPU node'], ['provider', 'Provider API']] },
   { group: 'Reference', items: [['errors', 'Errors & limits']] },
 ]
@@ -610,6 +622,113 @@ function DocsToc({ active }: { active: string }) {
 }
 
 /* center content - title + all doc sections */
+/* $GGRID token facts. Supply and the renounced authorities are read LIVE from chain
+   (the burn cut shrinks supply on every job), so nothing here is a stale constant.
+   When the gateway has no RPC configured we show the immutable facts only and say
+   the live figures are unavailable rather than inventing them. */
+const num = (n: number | undefined, dp = 0) =>
+  n === undefined ? '-' : n.toLocaleString('en-US', { maximumFractionDigits: dp })
+
+function TokenFacts() {
+  const [t, setT] = useState<TokenInfo | null>(null)
+  useEffect(() => {
+    api.token().then(setT).catch(() => setT({ available: false }))
+  }, [])
+
+  const live = t?.available === true
+  const explorer = t?.mint ? `https://solscan.io/token/${t.mint}` : undefined
+
+  const rows: [string, ReactNode][] = [
+    ['Name', 'GpuGrid'],
+    ['Symbol', <MonoInline key="s">$GGRID</MonoInline>],
+    ['Network', 'Solana'],
+    ['Standard', t?.tokenProgram === 'token2022' ? 'Token-2022' : 'SPL Token'],
+    ['Decimals', live ? String(t!.decimals) : '6'],
+    [
+      'Mint address',
+      t?.mint ? (
+        <a href={explorer} target="_blank" rel="noopener noreferrer" style={{ color: ACCENT, fontFamily: 'var(--mono)', fontSize: 12.5, wordBreak: 'break-all' }}>
+          {t.mint}
+        </a>
+      ) : (
+        <span style={{ color: DIM }}>unavailable</span>
+      ),
+    ],
+  ]
+
+  return (
+    <>
+      <P>
+        <b style={{ color: INK }}>$GGRID</b> is the payment and reward asset of the network. Developers spend it on
+        inference, GPU providers earn it, and stakers share the protocol fee. It is a fixed-supply token: the mint
+        authority is renounced, so no new $GGRID can ever be created. A portion was <b style={{ color: INK }}>burned</b>
+        {' '}earlier in the network's life, permanently reducing supply below the initial mint.
+      </P>
+
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(190px,1fr))', gap: 12, margin: '18px 0' }}>
+        {[
+          ['Total supply', live ? `${num(t!.supply, 2)}` : '-', 'circulating, live from chain'],
+          ['Initial supply', live ? num(t!.initialSupply) : '1,000,000,000', 'minted once, at launch'],
+          ['Burned to date', live ? num(t!.burned, 2) : '-', 'permanently removed from supply'],
+        ].map(([k, v, sub]) => (
+          <div key={k} style={{ padding: '16px 14px', borderRadius: 10, background: 'rgba(6,9,12,.55)', border: '1px solid rgba(140,158,176,.14)' }}>
+            <div style={{ ...LABEL, fontSize: 10 }}>{String(k).toUpperCase()}</div>
+            <div style={{ fontFamily: 'var(--display)', fontWeight: 300, fontSize: 25, color: k === 'Burned to date' ? CORE : ACCENT, margin: '6px 0 4px' }}>{v}</div>
+            <div style={{ fontFamily: 'var(--mono)', fontSize: 10.5, color: DIM }}>{sub}</div>
+          </div>
+        ))}
+      </div>
+
+      {!live && (
+        <P>
+          <span style={{ color: CORE }}>Live supply is temporarily unavailable</span> - read it straight from the chain with{' '}
+          <MonoInline>getTokenSupply</MonoInline>, or check the explorer.
+        </P>
+      )}
+
+      <div style={{ overflowX: 'auto', margin: '4px 0 18px' }}>
+        <table style={{ width: '100%', borderCollapse: 'collapse', fontFamily: 'var(--display)', fontSize: 14 }}>
+          <tbody>
+            {rows.map(([k, v]) => (
+              <tr key={k} style={{ borderTop: '1px solid rgba(140,158,176,.1)' }}>
+                <td style={{ padding: '11px 12px 11px 0', color: DIM, whiteSpace: 'nowrap', width: 150 }}>{k}</td>
+                <td style={{ padding: '11px 0', color: INK }}>{v}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(220px,1fr))', gap: 12, marginBottom: 18 }}>
+        {[
+          ['Mint authority', live ? (t!.mintAuthorityRenounced ? 'Renounced' : 'Active') : 'Renounced', 'No one can mint more $GGRID'],
+          ['Freeze authority', live ? (t!.freezeAuthorityRenounced ? 'Renounced' : 'Active') : 'Renounced', 'No one can freeze your tokens'],
+        ].map(([k, v, sub]) => {
+          const good = v === 'Renounced'
+          return (
+            <div key={k} style={{ padding: '14px', borderRadius: 10, background: 'rgba(6,9,12,.55)', border: `1px solid ${good ? 'rgba(95,212,226,.28)' : 'rgba(230,164,75,.35)'}` }}>
+              <div style={{ ...LABEL, fontSize: 10 }}>{String(k).toUpperCase()}</div>
+              <div style={{ fontFamily: 'var(--display)', fontWeight: 300, fontSize: 18, color: good ? ACCENT : CORE, margin: '5px 0 3px' }}>{v}</div>
+              <div style={{ fontFamily: 'var(--mono)', fontSize: 10.5, color: DIM }}>{sub}</div>
+            </div>
+          )
+        })}
+      </div>
+
+      <P>
+        <b style={{ color: INK }}>Utility.</b> Developers deposit $GGRID to buy inference credits. Every job is settled
+        on-chain by the <MonoInline>ggrid_payout</MonoInline> contract, which splits the payment{' '}
+        <MonoInline>75% provider · 20% stakers · 5% treasury</MonoInline> - code, not a promise. Staking
+        $GGRID earns you a proportional share of that 20% cut.
+      </P>
+      <P>
+        <b style={{ color: INK }}>Supply is deflationary by design.</b> There is no emission and no inflation. The only
+        force acting on supply is the burn, so the total can only shrink as the network is used.
+      </P>
+    </>
+  )
+}
+
 function DocsContent() {
   const origin = typeof window !== 'undefined' ? window.location.origin : 'https://gpugrid.app'
   return (
@@ -697,6 +816,75 @@ console.log(r.choices[0].message.content);`}</Code>
           <Code title="CURL">{`curl ${origin}/v1/models -H "Authorization: Bearer ggrid_sk_..."`}</Code>
         </DocSection>
 
+        <DocSection id="catalog" title="Models & pricing">
+          <P>
+            The grid is <b style={{ color: INK }}>model-agnostic</b>. There is no fixed allow-list: it serves whatever a
+            provider has pulled in <MonoInline>ollama</MonoInline>, so the live set grows as the network grows. Ask for a
+            model by its Ollama name (for example <MonoInline>llama3.1:8b</MonoInline> or <MonoInline>qwen2.5:7b</MonoInline>)
+            and the router sends your request to the cheapest live GPU serving it.
+          </P>
+
+          <div style={{ margin: '4px 0 6px', padding: '13px 15px', borderRadius: 10, background: 'rgba(95,212,226,.06)', border: '1px solid rgba(95,212,226,.28)' }}>
+            <div style={{ ...LABEL, fontSize: 10, color: ACCENT, marginBottom: 5 }}>ANY MODEL WORKS</div>
+            <div style={{ fontFamily: 'var(--display)', fontSize: 14.5, color: '#cdd9e4', lineHeight: 1.55 }}>
+              Models below have a published price. <b style={{ color: INK }}>Any other model a provider serves also works</b> - it is
+              simply billed at the flat default rate until it is added to the price sheet. Call <MonoInline>GET /v1/models</MonoInline>{' '}
+              to see exactly what is online right now.
+            </div>
+          </div>
+
+          <P>Published rates, per 1,000,000 tokens (1 credit = 1 micro-USD):</P>
+          <div style={{ overflowX: 'auto', margin: '2px 0 16px' }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse', fontFamily: 'var(--display)', fontSize: 14 }}>
+              <thead>
+                <tr style={{ borderBottom: '1px solid rgba(140,158,176,.2)' }}>
+                  {['Model', 'Class', 'Input / 1M', 'Output / 1M'].map((h, i) => (
+                    <th key={h} style={{ ...LABEL, fontSize: 10, textAlign: i > 1 ? 'right' : 'left', padding: '0 10px 9px 0', color: DIM }}>{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {([
+                  ['llama3:8b', '8B', '$0.05', '$0.15'],
+                  ['llama3.1:8b', '8B', '$0.05', '$0.15'],
+                  ['qwen2.5:7b', '7B', '$0.05', '$0.15'],
+                  ['mistral:7b', '7B', '$0.05', '$0.15'],
+                  ['gemma2:9b', '9B', '$0.06', '$0.18'],
+                  ['llama3:70b', '70B', '$0.30', '$0.90'],
+                  ['any other model', 'default', '$0.10', '$0.30'],
+                ] as [string, string, string, string][]).map(([m, cls, inp, out]) => {
+                  const fallback = cls === 'default'
+                  return (
+                    <tr key={m} style={{ borderTop: '1px solid rgba(140,158,176,.1)' }}>
+                      <td style={{ padding: '10px 10px 10px 0' }}>
+                        <MonoInline>{m}</MonoInline>
+                      </td>
+                      <td style={{ padding: '10px 10px 10px 0', color: fallback ? CORE : DIM }}>{cls}</td>
+                      <td style={{ padding: '10px 0', color: INK, textAlign: 'right', fontFamily: 'var(--mono)', fontSize: 12.5 }}>{inp}</td>
+                      <td style={{ padding: '10px 0', color: INK, textAlign: 'right', fontFamily: 'var(--mono)', fontSize: 12.5 }}>{out}</td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          </div>
+
+          <P>
+            <b style={{ color: INK }}>Embeddings too.</b> Embedding models (such as <MonoInline>nomic-embed-text</MonoInline>) run
+            through <MonoInline>/v1/embeddings</MonoInline> on nodes that advertise that capability, billed per token the same way.
+          </P>
+          <P>
+            <b style={{ color: INK }}>Pick a specific GPU.</b> Send an <MonoInline>x-ggrid-node</MonoInline> header with a node id
+            to pin your request to one exact machine instead of the auto-router - the GPU-marketplace mode. Browse available nodes
+            with <MonoInline>GET /api/nodes</MonoInline>.
+          </P>
+          <P style={{ color: DIM, fontSize: 13.5 }}>
+            If no online node serves the model you ask for, the request returns <MonoInline>404</MonoInline> (or spins up a cloud GPU
+            when cloud fallback is enabled for your account). Full per-model prices also live on the{' '}
+            <a href="#/pricing" style={{ color: ACCENT }}>Pricing</a> page.
+          </P>
+        </DocSection>
+
         <DocSection id="account" title="Account & credits">
           <P>Create an account (returns a key + free credits), check your balance and usage, and manage keys.</P>
           <Endpoint method="POST" path="/api/signup" />
@@ -714,6 +902,13 @@ console.log(r.choices[0].message.content);`}</Code>
           <Endpoint method="POST" path="/api/credits/intent" />
           <Endpoint method="GET" path="/api/credits/status" />
           <P><MonoInline>intent</MonoInline> returns an unsigned deposit transaction + a reference; your wallet signs and sends it; poll <MonoInline>status</MonoInline> until <MonoInline>CONFIRMED</MonoInline> and the credits land on your balance.</P>
+        </DocSection>
+
+        <DocSection id="token" title="$GGRID token">
+          <TokenFacts />
+          <P>The same figures are available programmatically:</P>
+          <Endpoint method="GET" path="/api/token" />
+          <Code title="CURL">{`curl ${origin}/api/token`}</Code>
         </DocSection>
 
         <DocSection id="guide" title="Run a GPU node (become a provider)">
@@ -745,7 +940,7 @@ console.log(r.choices[0].message.content);`}</Code>
             (Pro / mini / Studio) stays at full speed and earns more.
           </P>
           <P><b style={{ color: INK }}>3. Stay online</b> - keep the window open. Your node shows as <MonoInline>online</MonoInline> in the console and the grid routes jobs to it automatically. The more reliable your uptime, the more traffic you get.</P>
-          <P><b style={{ color: INK }}>4. Add a wallet & withdraw</b> - set your Solana payout address in the console, then withdraw your accrued balance as $GGRID whenever you want. The split (75% you / 12.5% burn / 7.5% stakers / 5% treasury) is enforced on-chain.</P>
+          <P><b style={{ color: INK }}>4. Add a wallet & withdraw</b> - set your Solana payout address in the console, then withdraw your accrued balance as $GGRID whenever you want. The split (75% you / 20% stakers / 5% treasury) is enforced on-chain.</P>
           <P style={{ color: DIM, fontSize: 13.5 }}>Earnings scale with network demand - a node that’s online and reliable earns more as traffic grows. Keep your provider token secret; anyone with it controls your node and payouts.</P>
         </DocSection>
 
@@ -805,13 +1000,33 @@ function DocsLayout() {
   )
 }
 
+/* $GGRID staking — public page, same shell/style as the other content pages. Embeds
+   the exact <Staking /> panel the developer console mounts (signs with Phantom directly,
+   so it works here without a login). Until the gateway has GGRID_STAKE_PROGRAM_ID set,
+   the panel shows its own "not live yet" state. */
+function StakingPage() {
+  return (
+    <div style={{ maxWidth: 720, margin: '0 auto' }}>
+      <div style={{ ...LABEL, marginBottom: 12 }}>$GGRID · STAKING</div>
+      <h1 style={{ ...H2, marginBottom: 10 }}>Stake $GGRID, earn from every job</h1>
+      <p style={{ ...LEAD, marginBottom: 28 }}>
+        Stake $GGRID and earn the 20% cut the network takes from every inference job. Rewards
+        accrue on-chain in real time, and unstaking is instant — no lock-up.
+      </p>
+      <Suspense fallback={<p style={{ ...LEAD, color: SUB }}>Loading…</p>}>
+        <StakingPanel />
+      </Suspense>
+    </div>
+  )
+}
+
 /* ---------------- router entry ---------------- */
 export default function Pages({ page }: { page: PageId }) {
   if (page === 'docs') return <DocsLayout />
   return (
     <PageShell page={page}>
       <div key={page} className="console-tab">
-        {page === 'pricing' ? <Pricing /> : <Stats />}
+        {page === 'pricing' ? <Pricing /> : page === 'stats' ? <Stats /> : <StakingPage />}
       </div>
     </PageShell>
   )

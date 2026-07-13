@@ -43,6 +43,9 @@ interface Attempt {
   model: string
   body: any
   endpoint: Endpoint
+  // Who pays for the job (defaults to userId). Free-tier / playground requests
+  // attribute the job to the real user but bill the sandbox fund.
+  billUserId?: string
 }
 
 // Run one job against one node. Returns a Response on success (or a definitive
@@ -79,6 +82,7 @@ export async function tryProxy(a: Attempt): Promise<Response | null> {
       tokensOut: u.out,
       cost: Math.max(0, Math.ceil(priceFor(model, u) * node.price_factor)),
       latencyMs,
+      billUserId: a.billUserId,
     })
     setActive(node.id, -1)
     reward(node.id)

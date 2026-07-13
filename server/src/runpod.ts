@@ -38,7 +38,7 @@ export function markRunpodUse(nodeId: string): void {
 
 export async function ensureNode(model: string): Promise<NodeRow | null> {
   if (!config.runpodApiKey) {
-    console.warn('[runpod] disabled - no RUNPOD_API_KEY; cannot fall back')
+    console.warn('[runpod] disabled — no RUNPOD_API_KEY; cannot fall back')
     return null
   }
   ensureSystemProvider()

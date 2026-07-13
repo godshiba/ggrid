@@ -2,9 +2,10 @@ import { resolve } from 'node:path'
 import { readFileSync } from 'node:fs'
 import { createHash } from 'node:crypto'
 import { config, solanaConfigured } from './config'
+import { rpcFetch } from './cache'
 
 // On-chain payout client for the ggrid_payout program. Heavy Solana deps are
-// imported lazily so the gateway boots (and tests run) without them installed -
+// imported lazily so the gateway boots (and tests run) without them installed —
 // they're only pulled in the first time a payout is actually attempted.
 //
 // Disabled cleanly when the Solana env isn't set (see solanaConfigured()).
@@ -37,7 +38,7 @@ async function readClient(): Promise<ReadClient> {
   const web3 = await import('@solana/web3.js')
   const splToken = await import('@solana/spl-token')
   const s = config.solana
-  const connection = new web3.Connection(s.rpcUrl, 'confirmed')
+  const connection = new web3.Connection(s.rpcUrl, { commitment: 'confirmed', fetch: rpcFetch })
   const mint = new web3.PublicKey(s.mint)
   const tokenProgram = s.tokenProgram === 'token' ? splToken.TOKEN_PROGRAM_ID : splToken.TOKEN_2022_PROGRAM_ID
   readCached = { web3, splToken, connection, mint, tokenProgram, decimals: s.decimals }
@@ -45,7 +46,7 @@ async function readClient(): Promise<ReadClient> {
 }
 
 // Read a wallet's real on-chain $GGRID balance. Returns 0 (not an error) when the
-// wallet has no associated token account yet - that just means it never held any.
+// wallet has no associated token account yet — that just means it never held any.
 // A pure public chain read; never touches the authority key.
 export async function getWalletBalance(
   walletAddress: string,
@@ -65,6 +66,49 @@ export async function getWalletBalance(
   } catch {
     // getTokenAccountBalance throws if the ATA doesn't exist → zero balance.
     return { rawAmount: '0', uiAmount: 0, decimals: c.decimals, mint }
+  }
+}
+
+export interface TokenInfo {
+  mint: string
+  tokenProgram: 'token' | 'token2022'
+  decimals: number
+  rawSupply: string
+  supply: number
+  initialSupply: number
+  burned: number
+  /** Null mint authority = no one can ever mint more $GGRID. */
+  mintAuthorityRenounced: boolean
+  /** Null freeze authority = no one can freeze a holder's tokens. */
+  freezeAuthorityRenounced: boolean
+}
+
+// Live, on-chain facts about the $GGRID mint: supply, decimals, and whether the
+// mint/freeze authorities are renounced. Read straight from the chain rather than
+// hard-coded (supply reflects tokens already burned; the mint authority is renounced).
+export async function getTokenInfo(): Promise<TokenInfo> {
+  const c = await readClient()
+  const supplyRes = await c.connection.getTokenSupply(c.mint)
+  const decimals: number = supplyRes.value.decimals
+  const rawSupply: string = String(supplyRes.value.amount)
+  const supply = Number(rawSupply) / 10 ** decimals
+
+  // Authorities live in the mint account itself.
+  const info = await c.connection.getParsedAccountInfo(c.mint)
+  const parsed = (info.value?.data as any)?.parsed?.info ?? {}
+
+  const initialSupply = config.solana.initialSupply
+  return {
+    mint: c.mint.toBase58(),
+    tokenProgram: config.solana.tokenProgram,
+    decimals,
+    rawSupply,
+    supply,
+    initialSupply,
+    // Supply only ever falls (minting is renounced), so the gap is what has burned.
+    burned: Math.max(0, initialSupply - supply),
+    mintAuthorityRenounced: parsed.mintAuthority == null,
+    freezeAuthorityRenounced: parsed.freezeAuthority == null,
   }
 }
 
@@ -101,7 +145,7 @@ async function client(): Promise<SolClient> {
   const s = config.solana
 
   const authority = loadAuthority(web3)
-  const connection = new web3.Connection(s.rpcUrl, 'confirmed')
+  const connection = new web3.Connection(s.rpcUrl, { commitment: 'confirmed', fetch: rpcFetch })
   const provider = new anchor.AnchorProvider(connection, new anchor.Wallet(authority), { commitment: 'confirmed' })
 
   const idl = JSON.parse(readFileSync(resolve(s.idlPath), 'utf8'))
@@ -116,7 +160,7 @@ async function client(): Promise<SolClient> {
   return cached
 }
 
-// Push a gross amount on-chain; the program splits it 75/12.5/7.5/5 and the
+// Push a gross amount on-chain; the program splits it 75/0/20/5 and the
 // provider receives ~75% in real $GGRID. Creates the provider's token account
 // if missing (authority pays the rent). Returns the transaction signature.
 export async function settleProvider(payoutWallet: string, grossRaw: bigint): Promise<{ signature: string }> {
@@ -161,7 +205,7 @@ function anchorDiscriminator(name: string): Buffer {
   return createHash('sha256').update(`global:${name}`).digest().subarray(0, 8)
 }
 
-// A fresh, unguessable reference pubkey (never signs - used only as a tx marker).
+// A fresh, unguessable reference pubkey (never signs — used only as a tx marker).
 export async function createReference(): Promise<string> {
   const c = await client()
   return c.web3.Keypair.generate().publicKey.toBase58()
@@ -219,7 +263,7 @@ export async function buildDepositTransaction(
     { pubkey: new PublicKey(c.cfg.vault), isSigner: false, isWritable: true },
     { pubkey: c.tokenProgram, isSigner: false, isWritable: false },
     { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
-    // trailing reference - Anchor drops extras into remaining_accounts (ignored),
+    // trailing reference — Anchor drops extras into remaining_accounts (ignored),
     // but getSignaturesForAddress(reference) can then find this exact payment.
     { pubkey: ref, isSigner: false, isWritable: false },
   ]

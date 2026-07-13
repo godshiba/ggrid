@@ -75,7 +75,7 @@ export function nodeCaps(n: NodeRow): string[] {
 export function selectNode(
   model: string,
   exclude?: Set<string>,
-  opts: { endpoint?: 'chat' | 'embeddings'; longJob?: boolean } = {},
+  opts: { endpoint?: 'chat' | 'embeddings'; longJob?: boolean; pick?: 'best' | 'random' } = {},
 ): NodeRow | null {
   const endpoint = opts.endpoint ?? 'chat'
   const rows = db.query('SELECT * FROM nodes').all() as NodeRow[]
@@ -94,6 +94,11 @@ export function selectNode(
       if (a.n.reliability !== b.n.reliability) return b.n.reliability - a.n.reliability
       return a.l!.activeJobs - b.l!.activeJobs
     })
+  // Random pick (playground / sandbox-funded traffic): cheapest-first would let a
+  // provider undercut price_factor to funnel the free-tier fund to his own node.
+  // A uniform draw removes that lever and spreads sandbox jobs across providers.
+  if (opts.pick === 'random' && candidates.length)
+    return candidates[Math.floor(Math.random() * candidates.length)].n
   if (opts.longJob) {
     // Prefer actively-cooled nodes for sustained work; fall back to hot ones.
     const cooled = candidates.filter((x) => !x.n.fanless && !x.n.thermal_limited)
@@ -176,6 +181,7 @@ export function nodeStats(n: NodeRow) {
     online: isOnline(n.id),
     quarantined: n.reliability < config.minReliability,
     verifyError: n.verify_error ?? null,
+    geo: n.geo ?? null,
   }
 }
 
@@ -199,7 +205,7 @@ export function gpuLabel(n: NodeRow): string {
 }
 
 // Safe, public catalogue of nodes for the GPU marketplace. Never leaks url or
-// secrets - only what a developer needs to pick a GPU. Online nodes first, then
+// secrets — only what a developer needs to pick a GPU. Online nodes first, then
 // cheapest/fastest, so the picker reads top-to-bottom like the auto-router.
 export function listNodes(opts: { includeOffline?: boolean } = {}) {
   const rows = db.query('SELECT * FROM nodes').all() as NodeRow[]
@@ -212,6 +218,7 @@ export function listNodes(opts: { includeOffline?: boolean } = {}) {
       return {
         id: n.id,
         gpu: gpuLabel(n),
+        geo: n.geo ?? null,
         source: n.source,
         backend: n.backend ?? 'cuda',
         chip: n.chip ?? null,

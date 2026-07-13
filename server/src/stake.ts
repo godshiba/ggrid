@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto'
 import { config, stakeConfigured } from './config'
+import { rpcFetch } from './cache'
 
 // $GGRID staking client.
 //
@@ -40,7 +41,7 @@ async function client(): Promise<StakeClient> {
   if (!stakeConfigured()) throw new Error('staking not configured (needs SOLANA_RPC_URL + GGRID_MINT + GGRID_STAKE_PROGRAM_ID)')
   const web3 = await import('@solana/web3.js')
   const splToken = await import('@solana/spl-token')
-  const connection = new web3.Connection(config.solana.rpcUrl, 'confirmed')
+  const connection = new web3.Connection(config.solana.rpcUrl, { commitment: 'confirmed', fetch: rpcFetch })
   const programId = new web3.PublicKey(config.stake.programId)
   const mint = new web3.PublicKey(config.solana.mint)
   const tokenProgram = config.solana.tokenProgram === 'token' ? splToken.TOKEN_PROGRAM_ID : splToken.TOKEN_2022_PROGRAM_ID

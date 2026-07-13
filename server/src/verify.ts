@@ -1,4 +1,4 @@
-// Measured node verification - the "prove your hardware" gate.
+// Measured node verification — the "prove your hardware" gate.
 //
 // We NEVER trust a node's self-declared chip. A new Apple-Silicon ("metal") node
 // registers as `provisional` and is benchmarked here: a quick handshake bench
@@ -7,7 +7,7 @@
 // minutes of sustained inference). Only nodes that clear the tokens/sec floor AND
 // declare an allowed chip (M4/M5) become `verified` and serve paid traffic.
 //
-// cuda / runpod nodes skip the gate (auto-verified) - this is additive, the live
+// cuda / runpod nodes skip the gate (auto-verified) — this is additive, the live
 // CUDA network is unaffected.
 
 import { db, now } from './db'
@@ -53,24 +53,24 @@ export async function verifyNode(nodeId: string): Promise<void> {
   const node = getNode(nodeId)
   if (!node) return
 
-  // Non-metal nodes are trusted as before - auto-verify.
+  // Non-metal nodes are trusted as before — auto-verify.
   if ((node.backend ?? 'cuda') !== 'metal') {
     db.query('UPDATE nodes SET state=?, verified_at=? WHERE id=?').run('verified', now(), nodeId)
     return
   }
 
   try {
-    if (!chipAllowed(node.chip)) throw new Error(`unsupported chip '${node.chip ?? 'unknown'}' - M4/M5 only`)
+    if (!chipAllowed(node.chip)) throw new Error(`unsupported chip '${node.chip ?? 'unknown'}' — M4/M5 only`)
     const models = JSON.parse(node.models) as string[]
     const model = models[0]
     if (!model) throw new Error('node advertises no model to benchmark')
 
-    // 1) Handshake gate - quick floor check.
+    // 1) Handshake gate — quick floor check.
     const handshake = await benchOnce(node, model, config.verify.handshakeTokens)
     if (handshake < config.verify.minTokensPerSec)
       throw new Error(`below floor: ${handshake.toFixed(1)} < ${config.verify.minTokensPerSec} tok/s`)
 
-    // 2) Sustained probe - back-to-back rounds; compare first vs last for throttle.
+    // 2) Sustained probe — back-to-back rounds; compare first vs last for throttle.
     const samples: number[] = []
     for (let i = 0; i < config.verify.sustainedRounds; i++) {
       samples.push(await benchOnce(node, model, config.verify.sustainedTokens))

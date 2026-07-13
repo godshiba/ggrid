@@ -4,6 +4,8 @@ import { db, uid, now } from '../db'
 import { sha256, randToken } from '../auth'
 import { touch, dropNode, getNode } from '../registry'
 import { verifyNode } from '../verify'
+import { tagNodeGeo, requestIp } from '../geo'
+import { config } from '../config'
 
 export const nodes = new Hono()
 
@@ -31,6 +33,12 @@ nodes.post('/register', async (c) => {
     | { id: string }
     | undefined
   if (!prov) return c.json({ error: 'invalid providerToken' }, 401)
+
+  // Cap nodes per provider: junk registrations bloat the DB and slow selectNode
+  // (which scans all nodes on every job). A real provider needs a handful of nodes.
+  const nodeCount = (db.query('SELECT COUNT(*) AS n FROM nodes WHERE provider_id = ?').get(prov.id) as { n: number }).n
+  if (nodeCount >= config.security.maxNodesPerProvider)
+    return c.json({ error: 'node limit reached for this provider' }, 429)
 
   const id = uid('nod_')
   const secret = randToken('ggrid_node_')
@@ -62,6 +70,8 @@ nodes.post('/register', async (c) => {
     now(),
   )
   touch(id, 'ONLINE')
+  // Coarse "City, CC" from the agent's connecting IP (fire-and-forget, fail-open).
+  tagNodeGeo(id, requestIp(c))
   // Benchmark metal nodes in the background; the installer keeps heartbeating and
   // the node flips to `verified` (or `rejected`) once the probe finishes.
   if (backend === 'metal') void verifyNode(id).catch(() => {})
@@ -86,6 +96,8 @@ nodes.post('/:id/heartbeat', async (c) => {
   const p = beatSchema.safeParse(body)
   if (p.success && p.data.models) db.query('UPDATE nodes SET models=? WHERE id=?').run(JSON.stringify(p.data.models), id)
   touch(id, (p.success && p.data.status) || 'ONLINE')
+  // Backfill geo for nodes registered before the geo column existed (throttled).
+  if (!node.geo) tagNodeGeo(id, requestIp(c))
   return c.json({ ok: true, ttlMs: 30_000 })
 })
 

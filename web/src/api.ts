@@ -8,6 +8,7 @@ export interface Me {
   userId: string
   email: string | null
   balance: number
+  freeRequests?: number // signup grant, spent before credits are needed
   runpodAllowed: boolean
 }
 export interface ApiKeyRow {
@@ -84,10 +85,52 @@ export interface CreditStatus {
   note?: string
 }
 
+// Live on-chain facts about the $GGRID mint (supply drops as the burn cut fires).
+export interface TokenInfo {
+  available: boolean
+  symbol?: string
+  name?: string
+  network?: string
+  mint?: string
+  tokenProgram?: 'token' | 'token2022'
+  decimals?: number
+  supply?: number
+  initialSupply?: number
+  burned?: number
+  mintAuthorityRenounced?: boolean
+  freezeAuthorityRenounced?: boolean
+  error?: string
+}
+
+// $GGRID staking. All amounts are RAW token units (strings, to survive u64).
+export interface StakePool {
+  available: boolean
+  initialized?: boolean
+  totalStaked?: string
+  rewardPool?: string // everything sitting in the reward vault
+  claimableRewards?: string // rewardPool minus strandedRewards - what stakers can actually earn
+  strandedRewards?: string // landed while nothing was staked; unclaimable by design
+  totalRewards?: string
+  totalClaimed?: string
+  minStake?: string // smallest position the program allows (raw units)
+  decimals?: number
+  error?: string
+}
+export interface StakePosition {
+  available: boolean
+  wallet: string
+  staked?: string
+  claimable?: string // exactly what `claim` would pay right now
+  walletBalance?: string
+  decimals?: number
+  error?: string
+}
+
 // A GPU in the public marketplace (safe view - no url/secret).
 export interface GpuNode {
   id: string
   gpu: string
+  geo?: string | null // coarse "City, CC" of the node
   source: 'LOCAL' | 'RUNPOD'
   backend: 'cuda' | 'metal' | string
   chip: string | null
@@ -124,7 +167,12 @@ export interface Pricing {
   defaultPrice: { in: number; out: number }
   feeSplit: { providerPct: number; burnPct: number; stakersPct: number; treasuryPct: number }
   ggrid: { rawPerCredit: number; decimals: number; tokensPerCredit: number }
+  staking?: { enabled: boolean; minStake: string }
   free: {
+    signupFreeRequests?: number
+    playgroundPerIpPerDay?: number
+    playgroundModel?: string
+    freeMaxOutputTokens?: number
     signupBonusCredits: number
     signupBonusUsd: number
     rateLimitPerMin: number
@@ -132,6 +180,32 @@ export interface Pricing {
     maxOutputTokens: number
     communityGpusOnly: boolean
   }
+}
+
+// ---- anonymous playground (landing page "try it now" box) ----
+export interface PlaygroundInfo {
+  enabled: boolean
+  model: string
+  maxTokens: number
+  perIpPerDay: number
+  remaining: number
+  budgetOkToday: boolean
+  signupFreeRequests: number
+}
+export interface PlaygroundMeta {
+  node: string
+  gpu: string
+  geo: string | null
+  model: string
+  tokensIn: number
+  tokensOut: number
+  costUsd: number
+  latencyMs: number
+}
+export interface PlaygroundReply {
+  answer: string
+  meta: PlaygroundMeta
+  remaining: number
 }
 
 export class ApiError extends Error {
@@ -179,10 +253,25 @@ export const api = {
     req<{ userId: string; balance: number; apiKey?: string; isNew: boolean }>('/api/auth/privy', { body: { token: privyToken } }),
   stats: () => req<Stats>('/api/stats'),
   pricing: () => req<Pricing>('/api/pricing'),
+  // Anonymous playground: quota/status for the widget, and one free inference.
+  playgroundInfo: () => req<PlaygroundInfo>('/api/playground'),
+  playgroundAsk: (messages: { role: string; content: string }[]) =>
+    req<PlaygroundReply>('/api/playground', { body: { messages } }),
+  // Live $GGRID mint facts (supply, burn, renounced authorities).
+  token: () => req<TokenInfo>('/api/token'),
   // GPU marketplace catalogue. all=true also lists offline nodes.
   nodes: (all = false) => req<{ nodes: GpuNode[] }>(`/api/nodes${all ? '?all=1' : ''}`),
   // Real on-chain $GGRID balance for a Solana wallet (public chain read).
   walletBalance: (wallet: string) => req<WalletBalance>(`/api/wallet/balance?wallet=${encodeURIComponent(wallet)}`),
+
+  // ---- $GGRID staking (public reads; the staker signs the tx themselves) ----
+  stakePool: () => req<StakePool>('/api/stake/pool'),
+  stakePosition: (wallet: string) => req<StakePosition>(`/api/stake/position?wallet=${encodeURIComponent(wallet)}`),
+  // Unsigned stake/unstake/claim tx (base64) for the wallet to sign + send.
+  stakeTx: (action: 'stake' | 'unstake' | 'claim', wallet: string, tokens?: number) =>
+    req<{ transaction: string; action: string; rawAmount: string }>('/api/stake/tx', {
+      body: { action, wallet, tokens },
+    }),
   models: () => req<{ data: { id: string }[] }>('/v1/models'),
 
   // ---- developer (apiKey) ----
@@ -217,8 +306,11 @@ export const api = {
   providerEarnings: (token: string) => req<ProviderEarnings>('/api/provider/earnings', { token }),
   setProviderWallet: (token: string, wallet: string) =>
     req<{ ok: true; payoutWallet: string }>('/api/provider/wallet', { token, body: { wallet } }),
-  providerPayout: (token: string) => req<any>('/api/provider/payout', { token, method: 'POST' }),
-  providerPayouts: (token: string) => req<{ payouts: Payout[]; payoutsEnabled: boolean }>('/api/provider/payouts', { token }),
+  // Withdraw accrued balance as real $GGRID through the on-chain splitter.
+  providerPayout: (token: string) =>
+    req<any>('/api/provider/payout', { token, method: 'POST' }),
+  providerPayouts: (token: string) =>
+    req<{ payouts: Payout[]; payoutsEnabled: boolean }>('/api/provider/payouts', { token }),
 }
 
 /* 1 credit = 1 micro-USD. Render balances/costs as dollars. */

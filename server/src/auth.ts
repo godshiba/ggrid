@@ -17,11 +17,17 @@ export function bearer(authHeader: string | undefined): string | null {
 }
 
 // --- users ---
-export function createUser(email: string | null, balance: number): UserRow {
+export function createUser(email: string | null, balance: number, freeRequests = 0): UserRow {
   const id = uid('usr_')
   const ts = now()
-  db.query('INSERT INTO users (id,email,balance,created_at) VALUES (?,?,?,?)').run(id, email, balance, ts)
-  return { id, email, balance, created_at: ts }
+  db.query('INSERT INTO users (id,email,balance,free_requests,created_at) VALUES (?,?,?,?,?)').run(
+    id,
+    email,
+    balance,
+    freeRequests,
+    ts,
+  )
+  return { id, email, balance, runpod_allowed: 0, free_requests: freeRequests, created_at: ts }
 }
 
 export function getUser(id: string): UserRow | null {
@@ -34,11 +40,18 @@ export function getUserByPrivyId(privyId: string): UserRow | null {
 }
 
 // Create a GGRID account tied to a Privy identity (first console login).
-export function createUserWithPrivy(privyId: string, email: string | null, balance: number): UserRow {
+export function createUserWithPrivy(privyId: string, email: string | null, balance: number, freeRequests = 0): UserRow {
   const id = uid('usr_')
   const ts = now()
-  db.query('INSERT INTO users (id,email,balance,privy_id,created_at) VALUES (?,?,?,?,?)').run(id, email, balance, privyId, ts)
-  return { id, email, balance, created_at: ts }
+  db.query('INSERT INTO users (id,email,balance,free_requests,privy_id,created_at) VALUES (?,?,?,?,?,?)').run(
+    id,
+    email,
+    balance,
+    freeRequests,
+    privyId,
+    ts,
+  )
+  return { id, email, balance, runpod_allowed: 0, free_requests: freeRequests, created_at: ts }
 }
 
 // --- api keys ---

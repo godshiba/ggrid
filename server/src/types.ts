@@ -3,6 +3,7 @@ export interface UserRow {
   email: string | null
   balance: number
   runpod_allowed: number
+  free_requests: number // signup grant, billed to the sandbox fund while balance is empty
   created_at: number
 }
 
@@ -31,6 +32,7 @@ export interface NodeRow {
   tier: string | null
   verify_error: string | null
   verified_at: number | null
+  geo: string | null // coarse "City, CC" resolved from the node's address (never the IP itself)
   created_at: number
 }
 

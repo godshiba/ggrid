@@ -1,5 +1,6 @@
 import { Hono } from 'hono'
 import { z } from 'zod'
+import { db } from '../db'
 import { userByApiKey, bearer } from '../auth'
 import { selectNode, nodeForRequest, onlineModels, modelHasOnlineNode } from '../registry'
 import { waitForSlot } from '../queue'
@@ -7,6 +8,7 @@ import { ensureNode } from '../runpod'
 import { tryProxy, type Endpoint } from '../proxy'
 import { knownModels } from '../pricing'
 import { allow } from '../ratelimit'
+import { SANDBOX_USER_ID, sandboxBudgetOk } from '../sandbox'
 import { config } from '../config'
 
 export const v1 = new Hono()
@@ -26,8 +28,6 @@ async function handleProxy(c: any, endpoint: Endpoint): Promise<Response> {
   const user = userByApiKey(key)
   if (!user) return c.json({ error: { message: 'invalid API key', type: 'auth' } }, 401)
   if (!allow(key)) return c.json({ error: { message: 'rate limit exceeded', type: 'rate_limit' } }, 429)
-  if (user.balance <= config.minBalance)
-    return c.json({ error: { message: 'insufficient balance', type: 'billing' } }, 402)
 
   let body: any
   try {
@@ -39,6 +39,28 @@ async function handleProxy(c: any, endpoint: Endpoint): Promise<Response> {
   if (!parsed.success) return c.json({ error: { message: 'field "model" is required' } }, 400)
   const model = parsed.data.model
 
+  // Free tier: an empty balance may still run on the signup free-request counter.
+  // Those jobs bill the SANDBOX FUND (provider still earns 75%) and are capped
+  // like playground requests. The counter is consumed up front, atomically —
+  // AFTER body validation, so a malformed request never burns one.
+  let billUserId: string | undefined
+  if (user.balance <= config.minBalance) {
+    if ((user.free_requests ?? 0) <= 0)
+      return c.json(
+        { error: { message: 'insufficient balance — top up, or sign up bonus requests are used up', type: 'billing' } },
+        402,
+      )
+    if (!sandboxBudgetOk())
+      return c.json(
+        { error: { message: 'free requests are paused (daily free budget spent) — try later or top up', type: 'billing' } },
+        402,
+      )
+    const dec = db.query('UPDATE users SET free_requests = free_requests - 1 WHERE id = ? AND free_requests > 0').run(user.id)
+    if (dec.changes !== 1)
+      return c.json({ error: { message: 'insufficient balance', type: 'billing' } }, 402)
+    billUserId = SANDBOX_USER_ID
+  }
+
   if (endpoint === 'chat' && body.stream)
     body.stream_options = { ...(body.stream_options ?? {}), include_usage: true }
 
@@ -46,15 +68,21 @@ async function handleProxy(c: any, endpoint: Endpoint): Promise<Response> {
   if (typeof body.max_tokens === 'number' && body.max_tokens > config.maxOutputTokens)
     body.max_tokens = config.maxOutputTokens
 
+  // A sandbox-funded request may not cost more than a playground one.
+  if (billUserId) {
+    const cap = config.playground.maxTokens
+    if (typeof body.max_tokens !== 'number' || body.max_tokens > cap) body.max_tokens = cap
+  }
+
   // GPU marketplace: a developer can pin a specific node via the `x-ggrid-node`
   // header (or a `node` field in the body). When pinned we honor the choice
-  // exactly - one attempt on that node, no auto-fallback to another GPU.
+  // exactly — one attempt on that node, no auto-fallback to another GPU.
   const pin = (c.req.header('x-ggrid-node') || (typeof body.node === 'string' ? body.node : '') || '').trim()
   if (typeof body.node !== 'undefined') delete body.node // never forward to Ollama
   if (pin) {
     const r = nodeForRequest(pin, model, endpoint)
     if ('error' in r) return c.json({ error: { message: r.error, type: 'node_unavailable' } }, 409)
-    const res = await tryProxy({ userId: user.id, node: r.node, model, body, endpoint })
+    const res = await tryProxy({ userId: user.id, node: r.node, model, body, endpoint, billUserId })
     if (res) return res
     return c.json({ error: { message: `pinned GPU '${pin}' failed`, type: 'upstream_error' } }, 502)
   }
@@ -76,17 +104,17 @@ async function handleProxy(c: any, endpoint: Endpoint): Promise<Response> {
     if (await waitForSlot(() => !!pick())) node = pick()
   }
 
-  // RunPod fallback costs real money, so it's gated to paid/allowed users - free
+  // RunPod fallback costs real money, so it's gated to paid/allowed users — free
   // signups can only use community GPUs. Tried after the queue (community first).
   if (!node && (user.runpod_allowed || config.freeTierRunpod)) node = await ensureNode(model)
 
   // Failover: try up to maxAttempts different nodes. tryProxy returns null when a
   // node fails at/before its first token, so one node dropping doesn't fail the
-  // request - it retries on the next.
+  // request — it retries on the next.
   let attempted = false
   for (let i = 0; i < config.routing.maxAttempts && node; i++) {
     attempted = true
-    const res = await tryProxy({ userId: user.id, node, model, body, endpoint })
+    const res = await tryProxy({ userId: user.id, node, model, body, endpoint, billUserId })
     if (res) return res
     tried.add(node.id)
     node = pick(tried)

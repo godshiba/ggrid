@@ -4,6 +4,9 @@ import { buildApp } from './app'
 import { config, solanaConfigured } from './config'
 import { startRetention } from './retention'
 import { startCanary } from './canary'
+import { sweepRateLimit } from './ratelimit'
+import { sweepCache } from './cache'
+import { sandboxBalance } from './sandbox'
 
 const app = buildApp()
 
@@ -22,8 +25,14 @@ if (existsSync(config.webDir)) {
 startRetention()
 startCanary()
 
+// Bound rate-limiter + RPC-cache memory: drop expired entries every 5 minutes.
+setInterval(() => {
+  sweepRateLimit()
+  sweepCache()
+}, 5 * 60_000)
+
 console.log(
-  `[GpuGrid] gateway listening on :${config.port} · db=${config.dbPath} · runpod=${config.runpodApiKey ? 'on' : 'off'} · payouts=${solanaConfigured() ? 'on' : 'off'} · retention=${config.privacy.retentionDays || 'off'} · spotcheck=${config.integrity.spotcheckRate > 0 ? config.integrity.spotcheckRate : 'off'} · canary=${config.integrity.canaryEnabled ? 'on' : 'off'}`,
+  `[GpuGrid] gateway listening on :${config.port} · db=${config.dbPath} · runpod=${config.runpodApiKey ? 'on' : 'off'} · payouts=${solanaConfigured() ? 'on' : 'off'} · retention=${config.privacy.retentionDays || 'off'} · spotcheck=${config.integrity.spotcheckRate > 0 ? config.integrity.spotcheckRate : 'off'} · canary=${config.integrity.canaryEnabled ? 'on' : 'off'} · playground=${config.playground.enabled ? `on (${config.playground.model}, fund $${(sandboxBalance() / 1_000_000).toFixed(2)})` : 'off'}`,
 )
 
 // Bun reads this default export to start the HTTP server.

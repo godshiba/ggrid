@@ -17,18 +17,33 @@ import {
   type Env,
 } from '../auth'
 import { verifyPrivyToken } from '../privy'
-import { onlineCount, onlineModels, dropNode, nodeStats, listNodes, getNode } from '../registry'
+import { onlineCount, onlineModels, dropNode, nodeStats, listNodes, getNode, selectNode, gpuLabel } from '../registry'
 import { verifyNode } from '../verify'
-import { allowSignup } from '../ratelimit'
+import { allowSignup, allowIp, allowProviderCreate, ipRemaining, DAY_MS } from '../ratelimit'
+import { memo, rpcGuard, RpcBusyError } from '../cache'
+import { tryProxy } from '../proxy'
+import { SANDBOX_USER_ID, sandboxBudgetOk } from '../sandbox'
 import { config } from '../config'
-import { solanaEnabled, solanaReadable, getWalletBalance } from '../solana'
+import { solanaEnabled, solanaReadable, getWalletBalance, getTokenInfo } from '../solana'
+import { stakeEnabled, poolInfo, position as stakePosition, buildTx as buildStakeTx, MIN_STAKE_RAW } from '../stake'
 import { requestPayout } from '../payouts'
 import { createIntent, checkIntent } from '../deposits'
-import { priceTable, defaultPrice } from '../pricing'
+import { priceTable, defaultPrice, priceFor } from '../pricing'
 import type { NodeRow } from '../types'
 
 function clientIp(c: any): string {
   return c.req.header('x-forwarded-for')?.split(',')[0]?.trim() || c.req.header('x-real-ip') || 'unknown'
+}
+
+// Per-IP throttle for the public, keyless RPC-backed reads (token / stake / wallet).
+function rpcRateOk(c: any): boolean {
+  return allowIp(clientIp(c), config.security.publicRpcRatePerMin)
+}
+
+// Run a public RPC read behind the short-TTL cache and the global in-flight cap, so a
+// flood collapses to at most one call per key per window and never piles up unbounded.
+function cachedRpc<T>(key: string, fn: () => Promise<T>): Promise<T> {
+  return memo(key, config.security.rpcCacheTtlMs, () => rpcGuard.run(fn))
 }
 
 // Control-plane API for the dashboards.
@@ -42,12 +57,16 @@ api.post('/signup', async (c) => {
   if (!allowSignup(clientIp(c)))
     return c.json({ error: { message: 'signup limit reached for your network, try later', type: 'rate_limit' } }, 429)
   const body = await c.req.json().catch(() => ({}))
-  const user = createUser(body?.email ?? null, config.signupBonus)
+  // Free tier = a request counter billed to the sandbox fund (bonus credits are 0
+  // by default now; SIGNUP_BONUS stays as a rollback knob).
+  const user = createUser(body?.email ?? null, config.signupBonus, config.signupFreeRequests)
   const { key } = issueApiKey(user.id, 'default')
-  return c.json({ userId: user.id, apiKey: key, balance: user.balance })
+  return c.json({ userId: user.id, apiKey: key, balance: user.balance, freeRequests: user.free_requests })
 })
 
 api.post('/providers', async (c) => {
+  if (!allowProviderCreate(clientIp(c)))
+    return c.json({ error: { message: 'too many providers created from your network today', type: 'rate_limit' } }, 429)
   const body = await c.req.json().catch(() => ({}))
   const id = uid('prv_')
   const token = randToken('ggrid_pv_')
@@ -73,14 +92,15 @@ api.post('/auth/privy', async (c) => {
   if (!claims) return c.json({ error: { message: 'invalid or expired Privy session', type: 'auth' } }, 401)
 
   const existing = getUserByPrivyId(claims.privyId)
-  if (existing) return c.json({ userId: existing.id, balance: existing.balance, isNew: false })
+  if (existing)
+    return c.json({ userId: existing.id, balance: existing.balance, freeRequests: existing.free_requests ?? 0, isNew: false })
 
-  // new account - same per-IP anti-abuse cap as /signup
+  // new account — same per-IP anti-abuse cap as /signup
   if (!allowSignup(clientIp(c)))
     return c.json({ error: { message: 'signup limit reached for your network, try later', type: 'rate_limit' } }, 429)
-  const user = createUserWithPrivy(claims.privyId, null, config.signupBonus)
+  const user = createUserWithPrivy(claims.privyId, null, config.signupBonus, config.signupFreeRequests)
   const { key } = issueApiKey(user.id, 'default')
-  return c.json({ userId: user.id, balance: user.balance, apiKey: key, isNew: true })
+  return c.json({ userId: user.id, balance: user.balance, freeRequests: user.free_requests, apiKey: key, isNew: true })
 })
 
 // Provider console login via Privy: find-or-create the provider tied to this Privy
@@ -101,7 +121,13 @@ api.post('/auth/privy-provider', async (c) => {
 // ---------- developer (API-key auth) ----------
 api.get('/me', requireUser, (c) => {
   const u = getUser(c.get('user').id)! // fresh balance
-  return c.json({ userId: u.id, email: u.email, balance: u.balance, runpodAllowed: !!u.runpod_allowed })
+  return c.json({
+    userId: u.id,
+    email: u.email,
+    balance: u.balance,
+    freeRequests: u.free_requests ?? 0,
+    runpodAllowed: !!u.runpod_allowed,
+  })
 })
 
 api.get('/usage', requireUser, (c) => {
@@ -172,7 +198,7 @@ api.post('/provider/wallet', requireProvider, async (c) => {
   return c.json({ ok: true, payoutWallet: wallet })
 })
 
-// Withdraw accrued balance as real $GGRID via the on-chain splitter.
+// Withdraw accrued balance as real $GGRID through the on-chain splitter.
 api.post('/provider/payout', requireProvider, async (c) => {
   const r = await requestPayout(c.get('provider'))
   return c.json(r.body as object, r.status as 200)
@@ -232,17 +258,105 @@ api.post('/credits/dev-topup', requireUser, async (c) => {
 // The REAL token balance sitting in a Solana wallet, read live from chain. This is
 // distinct from the user's off-chain spendable credit balance (/api/me): it's what
 // they actually hold on-chain and can deposit. `available:false` when the gateway
-// has no RPC/mint configured (e.g. token not live) - the UI degrades gracefully.
+// has no RPC/mint configured (e.g. token not live) — the UI degrades gracefully.
 api.get('/wallet/balance', async (c) => {
   const wallet = String(c.req.query('wallet') ?? '').trim()
   if (!/^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(wallet))
     return c.json({ error: 'valid Solana wallet address required' }, 400)
+  if (!rpcRateOk(c)) return c.json({ error: 'rate limit exceeded' }, 429)
   if (!solanaReadable()) return c.json({ available: false, wallet })
   try {
-    const b = await getWalletBalance(wallet)
+    const b = await cachedRpc(`wbal:${wallet}`, () => getWalletBalance(wallet))
     return c.json({ available: true, wallet, ...b })
   } catch (e) {
+    if (e instanceof RpcBusyError) return c.json({ error: 'service busy, retry shortly' }, 503)
     return c.json({ available: false, wallet, error: String((e as Error)?.message ?? e).slice(0, 200) })
+  }
+})
+
+// ---------- public: $GGRID token facts ----------
+// Live from chain: supply reflects tokens already burned (the fee split no longer burns), and the
+// renounced authorities are the trust claim - so neither is hard-coded here.
+// `available:false` when the gateway has no RPC/mint (UI degrades gracefully).
+api.get('/token', async (c) => {
+  if (!rpcRateOk(c)) return c.json({ error: 'rate limit exceeded' }, 429)
+  if (!solanaReadable()) return c.json({ available: false })
+  try {
+    const t = await cachedRpc('token', () => getTokenInfo())
+    return c.json({ available: true, ...t, symbol: 'GGRID', name: 'GpuGrid', network: 'Solana' })
+  } catch (e) {
+    if (e instanceof RpcBusyError) return c.json({ error: 'service busy, retry shortly' }, 503)
+    return c.json({ available: false, error: String((e as Error)?.message ?? e).slice(0, 200) })
+  }
+})
+
+// ---------- public: $GGRID staking ----------
+// Stakers earn the 20% cut of every job. All three actions are signed by the staker,
+// so the gateway only reads the pool and builds unsigned transactions.
+const SOL_WALLET = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/
+
+// DEV ONLY: canned, initialized pool/position so the console Staking panel can be
+// viewed locally without a deployed program. Gated on DEV_MOCK_STAKE; never prod.
+const MOCK_POOL = {
+  available: true, initialized: true, decimals: 6, minStake: '1000000',
+  totalStaked: '12480000000000', rewardPool: '84320420000', claimableRewards: '84320420000',
+  strandedRewards: '0', totalRewards: '84320420000', totalClaimed: '15660000000',
+}
+const MOCK_POS = {
+  available: true, decimals: 6,
+  staked: '250000000000', claimable: '1206840000', walletBalance: '48900000000',
+}
+
+api.get('/stake/pool', async (c) => {
+  if (!rpcRateOk(c)) return c.json({ error: 'rate limit exceeded' }, 429)
+  if (!stakeEnabled()) return c.json(config.devMockStake ? MOCK_POOL : { available: false })
+  try {
+    return c.json({ available: true, ...(await cachedRpc('stakepool', () => poolInfo())) })
+  } catch (e) {
+    if (e instanceof RpcBusyError) return c.json({ error: 'service busy, retry shortly' }, 503)
+    return c.json({ available: false, error: String((e as Error)?.message ?? e).slice(0, 200) })
+  }
+})
+
+api.get('/stake/position', async (c) => {
+  const wallet = String(c.req.query('wallet') ?? '').trim()
+  if (!SOL_WALLET.test(wallet)) return c.json({ error: 'valid Solana wallet address required' }, 400)
+  if (!rpcRateOk(c)) return c.json({ error: 'rate limit exceeded' }, 429)
+  if (!stakeEnabled()) return c.json(config.devMockStake ? { wallet, ...MOCK_POS } : { available: false, wallet })
+  try {
+    return c.json({ available: true, ...(await cachedRpc(`stakepos:${wallet}`, () => stakePosition(wallet))) })
+  } catch (e) {
+    if (e instanceof RpcBusyError) return c.json({ error: 'service busy, retry shortly' }, 503)
+    return c.json({ available: false, wallet, error: String((e as Error)?.message ?? e).slice(0, 200) })
+  }
+})
+
+// Returns an unsigned stake/unstake/claim tx (base64) for the wallet to sign + send.
+// Input is validated before the availability check so a malformed request is a 400
+// whether or not this gateway has staking configured.
+api.post('/stake/tx', async (c) => {
+  const body = await c.req.json().catch(() => ({}))
+  const action = String(body?.action ?? '')
+  const wallet = String(body?.wallet ?? '').trim()
+  if (!['stake', 'unstake', 'claim'].includes(action)) return c.json({ error: 'action must be stake, unstake or claim' }, 400)
+  if (!SOL_WALLET.test(wallet)) return c.json({ error: 'valid Solana wallet address required' }, 400)
+
+  let raw = 0n
+  if (action !== 'claim') {
+    const tokens = Number(body?.tokens)
+    if (!Number.isFinite(tokens) || tokens <= 0) return c.json({ error: 'positive $GGRID amount required' }, 400)
+    raw = BigInt(Math.round(tokens * 10 ** config.solana.decimals))
+    if (raw <= 0n) return c.json({ error: 'amount too small' }, 400)
+    // The MIN_STAKE floor applies to the resulting POSITION, not to this amount - a
+    // 0.5 $GGRID top-up onto an existing stake is legal. buildTx reads the caller's
+    // current position and enforces it there.
+  }
+  if (!stakeEnabled()) return c.json({ error: 'staking is not enabled on this gateway yet' }, 503)
+  try {
+    const transaction = await buildStakeTx(action as 'stake' | 'unstake' | 'claim', wallet, raw)
+    return c.json({ transaction, action, rawAmount: raw.toString() })
+  } catch (e) {
+    return c.json({ error: String((e as Error)?.message ?? e).slice(0, 200) }, 400)
   }
 })
 
@@ -260,9 +374,18 @@ api.get('/pricing', (c) => {
       decimals: config.solana.decimals,
       tokensPerCredit: config.solana.rawPerCredit / 10 ** config.solana.decimals,
     },
+    // Staking: is the stake pool live on this gateway? Stakers earn the 20% cut.
+    // minStake is the floor the program enforces on a position (raw units).
+    staking: { enabled: stakeEnabled() || config.devMockStake, minStake: MIN_STAKE_RAW.toString() },
     // Fee split applied to every job (percent).
-    feeSplit: { providerPct: 75, burnPct: 12.5, stakersPct: 7.5, treasuryPct: 5 },
+    feeSplit: { providerPct: 75, burnPct: 0, stakersPct: 20, treasuryPct: 5 },
     free: {
+      // The free tier is a REQUEST COUNTER billed to the sandbox fund; the old
+      // credit bonus is 0 by default (SIGNUP_BONUS remains a rollback knob).
+      signupFreeRequests: config.signupFreeRequests,
+      playgroundPerIpPerDay: config.playground.perIpPerDay, // anonymous, no account
+      playgroundModel: config.playground.model,
+      freeMaxOutputTokens: config.playground.maxTokens, // free requests are capped like the playground
       signupBonusCredits: config.signupBonus,
       signupBonusUsd: config.signupBonus / 1_000_000,
       rateLimitPerMin: config.rateLimitPerMin,
@@ -296,9 +419,15 @@ api.get('/privacy', (c) => {
 // ---------- public: GPU marketplace ----------
 // Safe catalogue of live GPUs so developers can pick a node to pin (via the
 // x-ggrid-node header). Never exposes node url/secret. ?all=1 includes offline.
-api.get('/nodes', (c) => {
+api.get('/nodes', async (c) => {
+  if (!rpcRateOk(c)) return c.json({ error: 'rate limit exceeded' }, 429)
   const includeOffline = c.req.query('all') === '1'
-  return c.json({ nodes: listNodes({ includeOffline }) })
+  // Short-TTL cache (single-flight): the catalogue changes slowly, so a flood of
+  // reads collapses to at most one full nodes scan per key per window. TTL 0 = off.
+  const ttl = config.security.nodesCacheTtlMs
+  const nodes =
+    ttl > 0 ? await memo(`nodes:${includeOffline}`, ttl, async () => listNodes({ includeOffline })) : listNodes({ includeOffline })
+  return c.json({ nodes })
 })
 
 // ---------- public: network stats ----------
@@ -307,6 +436,120 @@ api.get('/stats', (c) => {
   const done = (db.query("SELECT COUNT(*) AS n FROM jobs WHERE status='DONE'").get() as { n: number }).n
   const tokens = (db.query('SELECT COALESCE(SUM(tokens_in+tokens_out),0) AS t FROM jobs').get() as { t: number }).t
   return c.json({ onlineNodes: onlineCount(), models: onlineModels(), users, totalJobs: done, totalTokens: tokens })
+})
+
+// ---------- public: anonymous playground ----------
+// The landing-page "try it before signing up" box. No account needed; the spend
+// is bounded three ways: per-IP daily cap (real IP — Caddy rewrites XFF on prod),
+// the sandbox fund's daily budget, and the fund balance itself. Jobs run through
+// the ORDINARY pipeline on the sandbox account, so the provider still earns 75%.
+// Community GPUs only (never the paid RunPod fallback), fixed model, output capped.
+
+// Browsers must call from our own site; curl/no-Origin passes (IP cap still holds).
+function playgroundOriginOk(c: any): boolean {
+  const origin = c.req.header('origin')
+  if (!origin) return true
+  try {
+    const host = new URL(origin).hostname
+    return config.playground.allowedOrigins.some((a) => host === a || host.endsWith('.' + a))
+  } catch {
+    return false
+  }
+}
+
+// Widget bootstrap: what to render (chat box / limit CTA / busy notice).
+api.get('/playground', (c) => {
+  const pg = config.playground
+  return c.json({
+    enabled: pg.enabled,
+    model: pg.model,
+    maxTokens: pg.maxTokens,
+    perIpPerDay: pg.perIpPerDay,
+    remaining: pg.enabled ? ipRemaining('pg:' + clientIp(c), pg.perIpPerDay) : 0,
+    budgetOkToday: pg.enabled && sandboxBudgetOk(),
+    signupFreeRequests: config.signupFreeRequests,
+  })
+})
+
+api.post('/playground', async (c) => {
+  const pg = config.playground
+  if (!pg.enabled) return c.json({ error: { message: 'playground is disabled', type: 'disabled' } }, 404)
+  if (!playgroundOriginOk(c)) return c.json({ error: { message: 'origin not allowed', type: 'forbidden' } }, 403)
+
+  // Budget gate BEFORE the IP gate — a paused free tier must not eat the caller's quota.
+  if (!sandboxBudgetOk())
+    return c.json(
+      { error: { message: "today's free budget is spent — come back tomorrow, or sign up and top up", type: 'budget' } },
+      503,
+    )
+
+  // 'pg:' prefix — allowIp's buckets are shared with the RPC limiter; namespacing
+  // the key keeps a playground quota from colliding with the per-minute RPC quota.
+  const ipKey = 'pg:' + clientIp(c)
+  if (!allowIp(ipKey, pg.perIpPerDay, DAY_MS))
+    return c.json(
+      {
+        error: {
+          message: `free limit reached (${pg.perIpPerDay}/day) — sign up to get ${config.signupFreeRequests} free requests`,
+          type: 'rate_limit',
+        },
+        remaining: 0,
+      },
+      429,
+    )
+
+  const body = await c.req.json().catch(() => null)
+  const messages: { role: string; content: string }[] = Array.isArray(body?.messages)
+    ? body.messages
+    : typeof body?.prompt === 'string' && body.prompt.trim()
+      ? [{ role: 'user', content: body.prompt }]
+      : []
+  const shaped = messages.length > 0 && messages.every((m) => m && typeof m.role === 'string' && typeof m.content === 'string')
+  if (!shaped) return c.json({ error: { message: 'send { prompt: "..." } or { messages: [...] }' } }, 400)
+  const chars = messages.reduce((s, m) => s + m.content.length, 0)
+  if (chars > pg.maxPromptChars)
+    return c.json({ error: { message: `prompt too long (max ${pg.maxPromptChars} characters)` } }, 400)
+
+  // Model and output cap are FORCED — whatever the body asked for is ignored.
+  const reqBody = { model: pg.model, messages, stream: false, max_tokens: pg.maxTokens }
+  const remaining = ipRemaining(ipKey, pg.perIpPerDay)
+
+  // Up to two attempts on RANDOM eligible nodes (see selectNode: cheapest-first
+  // would let a provider undercut his way into the free fund). No capacity queue,
+  // no cloud fallback — the playground answers fast or declines honestly.
+  const tried = new Set<string>()
+  for (let i = 0; i < 2; i++) {
+    const node = selectNode(pg.model, tried, { endpoint: 'chat', pick: 'random' })
+    if (!node) break
+    const t0 = Date.now()
+    const res = await tryProxy({ userId: SANDBOX_USER_ID, node, model: pg.model, body: reqBody, endpoint: 'chat' })
+    if (res) {
+      const data: any = await res.json().catch(() => null)
+      const answer = typeof data?.choices?.[0]?.message?.content === 'string' ? data.choices[0].message.content : ''
+      const usage = { in: data?.usage?.prompt_tokens ?? 0, out: data?.usage?.completion_tokens ?? 0 }
+      const cost = Math.max(0, Math.ceil(priceFor(pg.model, usage) * node.price_factor))
+      return c.json({
+        answer,
+        // The line that sells the grid: which GPU, where, and what it really cost.
+        meta: {
+          node: node.id,
+          gpu: gpuLabel(node),
+          geo: node.geo ?? null,
+          model: pg.model,
+          tokensIn: usage.in,
+          tokensOut: usage.out,
+          costUsd: cost / 1_000_000,
+          latencyMs: Date.now() - t0,
+        },
+        remaining,
+      })
+    }
+    tried.add(node.id)
+  }
+  return c.json(
+    { error: { message: 'network busy — every community GPU is taken right now, try again in a minute', type: 'no_capacity' } },
+    503,
+  )
 })
 
 // ---------- admin (ADMIN_KEY) ----------
@@ -342,7 +585,7 @@ api.delete('/admin/nodes/:id', requireAdmin, (c) => {
   return c.json({ ok: true })
 })
 
-// Un-quarantine a node (reset reliability) - manual "un-slash".
+// Un-quarantine a node (reset reliability) — manual "un-slash".
 api.post('/admin/nodes/:id/reset', requireAdmin, (c) => {
   const res = db.query('UPDATE nodes SET reliability=1.0 WHERE id=?').run(c.req.param('id'))
   if (res.changes === 0) return c.json({ error: 'node not found' }, 404)
